@@ -9,7 +9,7 @@ local TweenService = game:GetService("TweenService")
 local CoreGui = game:GetService("CoreGui")
 local Lighting = game:GetService("Lighting")
 
--- ===== LOADING SCREEN (phong cách Kicia, có nút SKIP, chạy song song nên không làm chậm script) =====
+
 task.spawn(function()
     local TEAL = Color3.fromRGB(120, 205, 222)
     local parent = CoreGui
