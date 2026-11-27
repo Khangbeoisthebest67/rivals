@@ -3972,8 +3972,46 @@ x.Default = x.Value
 H[o] = x
 return x
 end
+-- Persistent toggle settings: restored when Khang Hub is executed again after a server change.
+local KH_TOGGLE_SETTINGS_PATH = "KhangHub/toggles.json"
+local KH_TOGGLE_SETTINGS = {}
+local KH_TOGGLE_SETTINGS_LOADED = false
+local function khLoadToggleSettings()
+    if KH_TOGGLE_SETTINGS_LOADED then return end
+    KH_TOGGLE_SETTINGS_LOADED = true
+    pcall(function()
+        if type(isfile) == "function" and type(readfile) == "function" and isfile(KH_TOGGLE_SETTINGS_PATH) then
+            local HttpService = game:GetService("HttpService")
+            local decoded = HttpService:JSONDecode(readfile(KH_TOGGLE_SETTINGS_PATH))
+            if type(decoded) == "table" then KH_TOGGLE_SETTINGS = decoded end
+        end
+    end)
+end
+local function khSaveToggleSettings()
+    pcall(function()
+        local HttpService = game:GetService("HttpService")
+        local data = {}
+        for id, toggle in pairs(H) do
+            -- Weapon Mods intentionally always start disabled.
+            if type(id) == "string" and not id:match("^P4S") and type(toggle) == "table" and type(toggle.Value) == "boolean" then
+                data[id] = toggle.Value
+            end
+        end
+        KH_TOGGLE_SETTINGS = data
+        if type(makefolder) == "function" and type(isfolder) == "function" and not isfolder("KhangHub") then
+            pcall(makefolder, "KhangHub")
+        end
+        if type(writefile) == "function" then
+            writefile(KH_TOGGLE_SETTINGS_PATH, HttpService:JSONEncode(data))
+        end
+    end)
+end
+
 Y_191.AddToggle = function(J, o, Z)
     Z = f_60:Validate(Z, l.Toggle)
+    khLoadToggleSettings()
+    local khSavedToggleValue = (type(o) == "string" and not o:match("^P4S")) and KH_TOGGLE_SETTINGS[o] or nil
+    if type(khSavedToggleValue) == "boolean" then Z.Default = khSavedToggleValue end
     local _unused_39 = J
     local J_220, x = _unused_39.Container, {Text = Z.Text, Value = Z.Default, Tooltip = Z.Tooltip, DisabledTooltip = Z.DisabledTooltip, TooltipTable = nil, Callback = Z.Callback, Changed = Z.Changed, Risky = Z.Risky, Disabled = Z.Disabled, Visible = Z.Visible, Addons = {}, Type = "Toggle"}
     local Z_221 = F_4("TextButton", {Active = not x.Disabled, BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 18), Text = "", Visible = x.Visible, Parent = J_220})
@@ -4025,6 +4063,7 @@ end
 f_60:UpdateDependencyBoxes()
 f_60:SafeCallback(x.Callback, x.Value)
 f_60:SafeCallback(x.Changed, x.Value)
+pcall(khSaveToggleSettings)
 end
 x.SetDisabled = function(L, L_226)
     x.Disabled = L_226
@@ -4072,6 +4111,10 @@ x.Holder = Z_221
 table.insert(_unused_39.Elements, x)
 x.Default = x.Value
 H[o] = x
+if type(khSavedToggleValue) == "boolean" then
+    f_60:SafeCallback(x.Callback, x.Value)
+    f_60:SafeCallback(x.Changed, x.Value)
+end
 return x
 end
 Y_191.AddInput = function(J, L, o)
@@ -15159,7 +15202,38 @@ return function(runtime,library)
     backendGroup:AddToggle('Recovery_Backend',{Text='Enable data spoofing',Default=false,Callback=safe(function(value)backend:SetEnabled(value)end)})
     backendGroup:AddLabel('Spoofers change this client’s display; server balances and progression stay unchanged.')
     backendGroup:AddButton({Text='Refresh client display',Func=safe(function()backend:Refresh()end)})
-    backendGroup:AddButton({Text='Unload',Func=function()runtime:Unload()end})
+    backendGroup:AddButton({Text='Unload',Func=function()
+        -- Unload the actual UI library first so its own UnloadSignals,
+        -- callbacks, and ScreenGui destruction always run.
+        pcall(function()
+            if library and type(library.Unload)=='function' then
+                library:Unload()
+            end
+        end)
+        -- Hard-remove the exact ScreenGui instance as a fallback.
+        pcall(function()
+            local gui=library and library.ScreenGui
+            if gui then gui:Destroy() end
+        end)
+        -- Also remove any leftover copies from either supported parent.
+        pcall(function()
+            local containers={game:GetService('CoreGui')}
+            local player=game:GetService('Players').LocalPlayer
+            local playerGui=player and player:FindFirstChildOfClass('PlayerGui')
+            if playerGui then containers[#containers+1]=playerGui end
+            for _,container in ipairs(containers) do
+                for _,obj in ipairs(container:GetDescendants()) do
+                    if obj:IsA('ScreenGui') and (obj.Name=='Obsidian' or obj.Name=='Khang Hub' or obj.Name=='KhangHub' or obj.Name=='Khang Hub Fixed UI') then
+                        pcall(function() obj:Destroy() end)
+                    end
+                end
+                for _,name in ipairs({'Obsidian','Khang Hub','KhangHub','Khang Hub Fixed UI'}) do
+                    local obj=container:FindFirstChild(name)
+                    if obj then pcall(function() obj:Destroy() end) end
+                end
+            end
+        end)
+    end})
     local identity=tabs.Spoofer:AddLeftGroupbox('Username Spoofer')
     config.SpoofedName,config.SpoofedDisplayName='',''
     identity:AddInput('Recovery_Username',{Text='Username',Default='',Finished=true,Callback=function(value)config.SpoofedName=value end})
@@ -15375,6 +15449,7 @@ return function(runtime,library)
     local Players=game:GetService("Players")
     local RunService=game:GetService("RunService")
     local UserInputService=game:GetService("UserInputService")
+    local TweenService=game:GetService("TweenService")
     local Lighting=game:GetService("Lighting")
     local CoreGui=game:GetService("CoreGui")
     local Camera=workspace.CurrentCamera
@@ -15395,11 +15470,14 @@ return function(runtime,library)
         Noclip=false,Fly=false,FlySpeed=60,AntiAFK=false,
         AntiAim=false,AntiAimMode=1,AntiAimSpeed=50,
         TargetStrafe=false,StrafeRange=1000,StrafeMode="Above Head",StrafeRadius=8,StrafeHeight=12,StrafeFace=true,
+        DashReturn=false,DashSpeed=140,DashMaxDistance=65,DashCooldown=2,
         DamageEscape=false,DamageEscapeDistance=40,
         Chams=false,Fullbright=false,FOVChanger=false,CameraFOV=90,
         ThirdPerson=false,TPDistance=12,ShowFPS=false,FPSBoost=false,
         SkyChanger=false,SkyTime=18,SkyStars=0,SkyDensity=35,SkyRainbow=false,SkyClouds=0,
         SkyBloom=20,SkySunRays=0,SkySaturation=0,SkyContrast=0,SkyExposure=0,SkyMatrix=false,
+        SkyboxPreset='Default',SkyDisabledElements={},SkyWeather='Off',SkyWeatherRate=100,SkyWeatherColor=Color3.fromRGB(255,255,255),
+        SkyAmbience=false,SkyAmbientColor=Color3.fromRGB(80,90,120),SkyOutdoorColor=Color3.fromRGB(125,145,180),SkyFog=false,SkyFogStart=0,SkyFogEnd=100000,SkyFogColor=Color3.fromRGB(150,175,210),
         MapDarkener=false,Darkness=10,
         AimPart=1,MouseScale=100,TargetHPMax=100,
     }
@@ -16359,6 +16437,144 @@ return function(runtime,library)
         WeaponMods.RestoreAll()
     end)
 
+    -- Client-only cosmetic hit feedback. This does not change weapon damage or targeting.
+    local hitFxEnabled = false
+    local hitFxColor = Color3.fromRGB(159, 133, 195)
+    local hitSoundEnabled = false
+    local hitSoundStyle = "Rust HS"
+    local hitSoundVolume = 0.5
+    local hitSoundPitch = 1
+    local hitSoundAssets = {
+        ["Rust HS"] = "rbxassetid://5043539486",
+        ["Neverlose"] = "rbxassetid://97643101798871",
+        ["Minecraft Bow"] = "rbxassetid://3442683707",
+        ["Minecraft Hit"] = "rbxassetid://8766809464",
+        ["CSGO"] = "rbxassetid://5764885315",
+        ["Bubble"] = "rbxassetid://6534947588",
+        ["Lazer"] = "rbxassetid://130791043",
+        ["Pick"] = "rbxassetid://1347140027",
+        ["Pop"] = "rbxassetid://198598793",
+        ["Rust"] = "rbxassetid://1255040462",
+        ["Sans"] = "rbxassetid://3188795283",
+        ["Fart"] = "rbxassetid://130833677",
+        ["Big"] = "rbxassetid://5332005053",
+        ["Vine"] = "rbxassetid://5332680810",
+        ["UwU"] = "rbxassetid://8679659744",
+        ["Bruh"] = "rbxassetid://4578740568",
+        ["Skeet"] = "rbxassetid://5633695679",
+        ["Fatality"] = "rbxassetid://6534947869",
+        ["Bonk"] = "rbxassetid://5766898159",
+        ["Minecraft"] = "rbxassetid://5869422451",
+        ["Gamesense"] = "rbxassetid://4817809188",
+        ["RIFK7"] = "rbxassetid://9102080552",
+    }
+    local hitFxConnection
+    local hitFxDebounce = setmetatable({}, { __mode = "k" })
+    local hitFxGroup = tabCombat:AddLeftGroupbox("Hit Effects")
+
+    local function emitCosmeticHitEffect(billboard)
+        if not hitFxEnabled or not billboard or not billboard:IsA("BillboardGui") then return end
+        if hitFxDebounce[billboard] then return end
+        local label = billboard:FindFirstChildWhichIsA("TextLabel", true)
+        if not label or not (tonumber(label.Text) and tonumber(label.Text) > 0) then return end
+        local adornee = billboard.Adornee
+        if not adornee and billboard.Parent and billboard.Parent:IsA("BasePart") then
+            adornee = billboard.Parent
+        end
+        local part = adornee
+        if part and part:IsA("Model") then
+            part = part.PrimaryPart or part:FindFirstChild("HumanoidRootPart") or part:FindFirstChildWhichIsA("BasePart")
+        end
+        if not part or not part:IsA("BasePart") then return end
+        hitFxDebounce[billboard] = true
+        if hitSoundEnabled then
+            local soundId = hitSoundAssets[hitSoundStyle]
+            if soundId then
+                local sound = Instance.new("Sound")
+                sound.Name = "KhangHubHitSound"
+                sound.SoundId = soundId
+                sound.Volume = hitSoundVolume
+                sound.PlaybackSpeed = hitSoundPitch
+                sound.Parent = workspace.CurrentCamera or workspace
+                sound:Play()
+                game:GetService("Debris"):AddItem(sound, 5)
+            end
+        end
+        local attachment = Instance.new("Attachment")
+        attachment.Name = "KhangHubHitFx"
+        attachment.Parent = part
+        local emitter = Instance.new("ParticleEmitter")
+        emitter.Name = "KhangHubHitSpark"
+        emitter.Texture = "rbxasset://textures/particles/sparkles_main.dds"
+        emitter.Color = ColorSequence.new(hitFxColor)
+        emitter.LightEmission = 0.8
+        emitter.Lifetime = NumberRange.new(0.25, 0.65)
+        emitter.Speed = NumberRange.new(3, 7)
+        emitter.SpreadAngle = Vector2.new(180, 180)
+        emitter.Rate = 0
+        emitter.Rotation = NumberRange.new(0, 360)
+        emitter.RotSpeed = NumberRange.new(-120, 120)
+        emitter.Size = NumberSequence.new({
+            NumberSequenceKeypoint.new(0, 0.22),
+            NumberSequenceKeypoint.new(1, 0)
+        })
+        emitter.Transparency = NumberSequence.new({
+            NumberSequenceKeypoint.new(0, 0.05),
+            NumberSequenceKeypoint.new(1, 1)
+        })
+        emitter.Parent = attachment
+        emitter:Emit(14)
+        task.delay(1.2, function()
+            if attachment and attachment.Parent then attachment:Destroy() end
+        end)
+    end
+
+    hitFxGroup:AddToggle("KH_HitFxEnabled", {
+        Text = "Enable hit particles",
+        Default = false,
+        Callback = function(value)
+            hitFxEnabled = value == true
+            if hitFxConnection then hitFxConnection:Disconnect(); hitFxConnection = nil end
+            if hitFxEnabled then
+                hitFxConnection = workspace.DescendantAdded:Connect(function(object)
+                    if object:IsA("BillboardGui") then
+                        task.defer(emitCosmeticHitEffect, object)
+                    end
+                end)
+            end
+        end
+    }):AddColorPicker("KH_HitFxColor", {
+        Default = hitFxColor,
+        Title = "Hit effect color",
+        Callback = function(value) hitFxColor = value end
+    })
+    hitFxGroup:AddToggle("KH_HitSoundEnabled", {
+        Text = "Enable hit sound",
+        Default = false,
+        Callback = function(value) hitSoundEnabled = value == true end
+    })
+    hitFxGroup:AddDropdown("KH_HitSoundStyle", {
+        Text = "Hit sound style",
+        Values = {"Rust HS", "Neverlose", "Minecraft Bow", "Minecraft Hit", "CSGO", "Bubble", "Lazer", "Pick", "Pop", "Rust", "Sans", "Fart", "Big", "Vine", "UwU", "Bruh", "Skeet", "Fatality", "Bonk", "Minecraft", "Gamesense", "RIFK7"},
+        Default = "Rust HS",
+        Callback = function(value) hitSoundStyle = value end
+    })
+    hitFxGroup:AddSlider("KH_HitSoundVolume", {
+        Text = "Hit sound volume",
+        Min = 0, Max = 100, Default = 50, Rounding = 0, Suffix = "%",
+        Callback = function(value) hitSoundVolume = value / 100 end
+    })
+    hitFxGroup:AddSlider("KH_HitSoundPitch", {
+        Text = "Hit sound pitch",
+        Min = 50, Max = 200, Default = 100, Rounding = 0, Suffix = "%",
+        Callback = function(value) hitSoundPitch = value / 100 end
+    })
+
+    library:OnUnload(function()
+        hitFxEnabled = false
+        if hitFxConnection then hitFxConnection:Disconnect(); hitFxConnection = nil end
+    end)
+
     -- Weapon Mods stay disabled until the user enables a toggle.
 
     -- ESP in Visuals tab
@@ -16401,6 +16617,84 @@ return function(runtime,library)
     gMoveR:AddSlider("KH_StrafeHeight",{Text="Height",Min=5,Max=35,Default=12,Rounding=0,Callback=function(v) KF.StrafeHeight=v end})
     gMoveR:AddSlider("KH_StrafeRadius",{Text="Position Distance",Min=3,Max=30,Default=8,Rounding=0,Callback=function(v) KF.StrafeRadius=v end})
 
+    -- Manual dash to a world point under the cursor, then return to the start.
+    -- This intentionally has no player targeting or automatic firing.
+    local dashGroup=tabMove:AddRightGroupbox("Dash & Return")
+    dashGroup:AddToggle("KH_DashReturn",{Text="Enable Dash & Return",Default=false,Callback=function(v) KF.DashReturn=v end})
+    dashGroup:AddSlider("KH_DashSpeed",{Text="Dash Intensity",Min=40,Max=300,Default=140,Rounding=0,Callback=function(v) KF.DashSpeed=v end})
+    dashGroup:AddSlider("KH_DashDistance",{Text="Max Distance",Min=10,Max=120,Default=65,Rounding=0,Callback=function(v) KF.DashMaxDistance=v end})
+    dashGroup:AddSlider("KH_DashCooldown",{Text="Cooldown (seconds)",Min=0,Max=8,Default=2,Rounding=1,Callback=function(v) KF.DashCooldown=v end})
+    dashGroup:AddLabel("Press E to dash to the ground point under your cursor and return.")
+
+    local dashBusy,dashLast= false,0
+    local dashTween,dashOrigin=nil,nil
+    local dashInputConn
+    local function runDashReturn()
+        if not KF.DashReturn or dashBusy or khangUnloaded then return end
+        local now=os.clock()
+        if now-dashLast<KF.DashCooldown then return end
+        local hum,root=getHum(),getRoot()
+        if not hum or not root or hum.Health<=0 then return end
+        local mouse=LocalPlayer:GetMouse()
+        local hitPart=mouse.Target
+        local hitModel=hitPart and hitPart:FindFirstAncestorOfClass("Model")
+        if hitModel and hitModel:FindFirstChildOfClass("Humanoid") then return end
+        local hitPosition=mouse.Hit.Position
+        local delta=hitPosition-root.Position
+        local distance=delta.Magnitude
+        if distance<5 then return end
+        local travel=math.min(distance,KF.DashMaxDistance)
+        local destination=root.Position+delta.Unit*travel
+        local groundY=hitPosition.Y+hum.HipHeight+(root.Size.Y*0.5)
+        destination=Vector3.new(destination.X,groundY,destination.Z)
+        local startCF=root.CFrame
+        local targetCF=CFrame.new(destination)*(startCF-startCF.Position)
+        local duration=math.clamp(travel/math.max(KF.DashSpeed,1),0.08,0.8)
+        dashBusy=true;dashLast=now;dashOrigin=startCF
+        local ok=pcall(function()
+            dashTween=TweenService:Create(root,TweenInfo.new(duration,Enum.EasingStyle.Linear),{CFrame=targetCF})
+            dashTween:Play();dashTween.Completed:Wait()
+            if root.Parent and hum.Health>0 and not khangUnloaded then
+                task.wait(0.18)
+                local returnDuration=math.clamp((root.Position-startCF.Position).Magnitude/math.max(KF.DashSpeed,1),0.08,0.8)
+                dashTween=TweenService:Create(root,TweenInfo.new(returnDuration,Enum.EasingStyle.Linear),{CFrame=startCF})
+                dashTween:Play();dashTween.Completed:Wait()
+            end
+        end)
+        dashTween=nil;dashOrigin=nil;dashBusy=false
+        if not ok then warn("[Khang Hub] Dash & Return failed") end
+    end
+    dashInputConn=UserInputService.InputBegan:Connect(function(input,processed)
+        if processed or input.KeyCode~=Enum.KeyCode.E then return end
+        task.spawn(runDashReturn)
+    end)
+
+local SKYBOX_PRESETS={
+    Default = { SkyboxBk = "rbxassetid://91458024", SkyboxDn = "rbxassetid://91457980", SkyboxFt = "rbxassetid://91458024", SkyboxLf = "rbxassetid://91458024", SkyboxRt = "rbxassetid://91458024", SkyboxUp = "rbxassetid://91458002" },
+    Neptune = { SkyboxBk = "rbxassetid://218955819", SkyboxDn = "rbxassetid://218953419", SkyboxFt = "rbxassetid://218954524", SkyboxLf = "rbxassetid://218958493", SkyboxRt = "rbxassetid://218957134", SkyboxUp = "rbxassetid://218950090" },
+    ["Among Us"] = { SkyboxBk = "rbxassetid://5752463190", SkyboxDn = "rbxassetid://5752463190", SkyboxFt = "rbxassetid://5752463190", SkyboxLf = "rbxassetid://5752463190", SkyboxRt = "rbxassetid://5752463190", SkyboxUp = "rbxassetid://5752463190" },
+    Nebula = { SkyboxBk = "rbxassetid://159454299", SkyboxDn = "rbxassetid://159454296", SkyboxFt = "rbxassetid://159454293", SkyboxLf = "rbxassetid://159454286", SkyboxRt = "rbxassetid://159454300", SkyboxUp = "rbxassetid://159454288" },
+    Vaporwave = { SkyboxBk = "rbxassetid://1417494030", SkyboxDn = "rbxassetid://1417494146", SkyboxFt = "rbxassetid://1417494253", SkyboxLf = "rbxassetid://1417494402", SkyboxRt = "rbxassetid://1417494499", SkyboxUp = "rbxassetid://1417494643" },
+    Clouds = { SkyboxBk = "rbxassetid://570557514", SkyboxDn = "rbxassetid://570557775", SkyboxFt = "rbxassetid://570557559", SkyboxLf = "rbxassetid://570557620", SkyboxRt = "rbxassetid://570557672", SkyboxUp = "rbxassetid://570557727" },
+    Twilight = { SkyboxBk = "rbxassetid://264908339", SkyboxDn = "rbxassetid://264907909", SkyboxFt = "rbxassetid://264909420", SkyboxLf = "rbxassetid://264909758", SkyboxRt = "rbxassetid://264908886", SkyboxUp = "rbxassetid://264907379" },
+    DaBaby = { SkyboxBk = "rbxassetid://7245418472", SkyboxDn = "rbxassetid://7245418472", SkyboxFt = "rbxassetid://7245418472", SkyboxLf = "rbxassetid://7245418472", SkyboxRt = "rbxassetid://7245418472", SkyboxUp = "rbxassetid://7245418472" },
+    Minecraft = { SkyboxBk = "rbxassetid://1876545003", SkyboxDn = "rbxassetid://1876544331", SkyboxFt = "rbxassetid://1876542941", SkyboxLf = "rbxassetid://1876543392", SkyboxRt = "rbxassetid://1876543764", SkyboxUp = "rbxassetid://1876544642" },
+    Chill = { SkyboxBk = "rbxassetid://5084575798", SkyboxDn = "rbxassetid://5084575916", SkyboxFt = "rbxassetid://5103949679", SkyboxLf = "rbxassetid://5103948542", SkyboxRt = "rbxassetid://5103948784", SkyboxUp = "rbxassetid://5084576400" },
+    Redshift = { SkyboxBk = "rbxassetid://401664839", SkyboxDn = "rbxassetid://401664862", SkyboxFt = "rbxassetid://401664960", SkyboxLf = "rbxassetid://401664881", SkyboxRt = "rbxassetid://401664901", SkyboxUp = "rbxassetid://401664936" },
+    ["Blue Stars"] = { SkyboxBk = "rbxassetid://149397684", SkyboxDn = "rbxassetid://149397686", SkyboxFt = "rbxassetid://149397688", SkyboxLf = "rbxassetid://149397692", SkyboxRt = "rbxassetid://149397697", SkyboxUp = "rbxassetid://149397702" },
+    ["Blue Aurora"] = { SkyboxBk = "rbxassetid://12063984", SkyboxDn = "rbxassetid://12064107", SkyboxFt = "rbxassetid://12064152", SkyboxLf = "rbxassetid://12064121", SkyboxRt = "rbxassetid://12064115", SkyboxUp = "rbxassetid://12064131" },
+    Realistic = { SkyboxBk = "rbxassetid://144933338", SkyboxDn = "rbxassetid://144931530", SkyboxFt = "rbxassetid://144933262", SkyboxLf = "rbxassetid://144933244", SkyboxRt = "rbxassetid://144933299", SkyboxUp = "rbxassetid://144931564" },
+    StarsShader = { SkyboxBk = "rbxassetid://169210090", SkyboxDn = "rbxassetid://169210108", SkyboxFt = "rbxassetid://169210121", SkyboxLf = "rbxassetid://169210133", SkyboxRt = "rbxassetid://169210143", SkyboxUp = "rbxassetid://169210149" },
+    Gloomy = { SkyboxBk = "rbxassetid://5346760450", SkyboxDn = "rbxassetid://5346760689", SkyboxFt = "rbxassetid://5346760919", SkyboxLf = "rbxassetid://5346761102", SkyboxRt = "rbxassetid://5346761335", SkyboxUp = "rbxassetid://5346761509" },
+    ["Nebula Purple"] = { SkyboxBk = "rbxassetid://129876530632297", SkyboxDn = "rbxassetid://108406529909981", SkyboxFt = "rbxassetid://104400530594543", SkyboxLf = "rbxassetid://73372229972523", SkyboxRt = "rbxassetid://87408857415924", SkyboxUp = "rbxassetid://13781740568136" },
+    Jungle = { SkyboxBk = "rbxassetid://214399891", SkyboxDn = "rbxassetid://214399887", SkyboxFt = "rbxassetid://214399894", SkyboxLf = "rbxassetid://214405668", SkyboxRt = "rbxassetid://214399899", SkyboxUp = "rbxassetid://214399889" },
+    Spongebob = { SkyboxBk = "rbxassetid://15962101128", SkyboxDn = "rbxassetid://15970246218", SkyboxFt = "rbxassetid://15962101128", SkyboxLf = "rbxassetid://15962101128", SkyboxRt = "rbxassetid://15962101128", SkyboxUp = "rbxassetid://15962901054" },
+    ["mountain scape"] = { SkyboxBk = "rbxassetid://12474836637", SkyboxDn = "rbxassetid://12474837052", SkyboxFt = "rbxassetid://12474836748", SkyboxLf = "rbxassetid://12474836935", SkyboxRt = "rbxassetid://12474836446", SkyboxUp = "rbxassetid://12474835757" },
+    ["yellowy cloud"] = { SkyboxBk = "rbxassetid://252760981", SkyboxDn = "rbxassetid://252763035", SkyboxFt = "rbxassetid://252761439", SkyboxLf = "rbxassetid://252760980", SkyboxRt = "rbxassetid://252760986", SkyboxUp = "rbxassetid://252762652" },
+    Aurora = { SkyboxBk = "rbxassetid://340908398", SkyboxDn = "rbxassetid://340908450", SkyboxFt = "rbxassetid://340908468", SkyboxLf = "rbxassetid://340908504", SkyboxRt = "rbxassetid://340908530", SkyboxUp = "rbxassetid://340908586" },
+    ["winter mountain"] = { SkyboxBk = "rbxassetid://402229526", SkyboxDn = "rbxassetid://402229596", SkyboxFt = "rbxassetid://402229293", SkyboxLf = "rbxassetid://402229368", SkyboxRt = "rbxassetid://402229417", SkyboxUp = "rbxassetid://402229564" },
+    stormy = { SkyboxBk = "rbxassetid://255027929", SkyboxDn = "rbxassetid://255027967", SkyboxFt = "rbxassetid://255027923", SkyboxLf = "rbxassetid://255027938", SkyboxRt = "rbxassetid://255027946", SkyboxUp = "rbxassetid://255027960" }, 
+     }
     -- SKY TAB
     local gSkyL=tabSky:AddLeftGroupbox("Sky")
     local gSkyR=tabSky:AddRightGroupbox("Shader")
@@ -16409,13 +16703,27 @@ return function(runtime,library)
     gSkyL:AddSlider("KH_SkyStars",{Text="Stars",Min=0,Max=5000,Default=0,Rounding=0,Callback=function(v) KF.SkyStars=v end})
     gSkyL:AddSlider("KH_SkyDensity",{Text="Density %",Min=0,Max=100,Default=35,Rounding=0,Callback=function(v) KF.SkyDensity=v end})
     gSkyL:AddToggle("KH_SkyRainbow",{Text="Rainbow",Default=false,Callback=function(v) KF.SkyRainbow=v end})
-    gSkyL:AddToggle("KH_SkyMatrix",{Text="Matrix Rain",Default=false,Callback=function(v) KF.SkyMatrix=v end})
+    gSkyL:AddToggle("KH_SkyAmbience",{Text="Custom ambience",Default=false,Callback=function(v) KF.SkyAmbience=v end}):AddColorPicker("KH_SkyAmbientColor",{Default=Color3.fromRGB(80,90,120),Title="Ambient color",Callback=function(v) KF.SkyAmbientColor=v end})
+    gSkyL:AddLabel("Outdoor ambient"):AddColorPicker("KH_SkyOutdoorColor",{Default=Color3.fromRGB(125,145,180),Title="Outdoor ambient",Callback=function(v) KF.SkyOutdoorColor=v end})
+    gSkyL:AddToggle("KH_SkyFog",{Text="Custom fog",Default=false,Callback=function(v) KF.SkyFog=v end})
+    gSkyL:AddSlider("KH_SkyFogStart",{Text="Fog start",Min=0,Max=10000,Default=0,Rounding=0,Callback=function(v) KF.SkyFogStart=v end})
+    gSkyL:AddSlider("KH_SkyFogEnd",{Text="Fog end",Min=100,Max=100000,Default=100000,Rounding=0,Callback=function(v) KF.SkyFogEnd=v end})
+    gSkyL:AddLabel("Fog color"):AddColorPicker("KH_SkyFogColor",{Default=Color3.fromRGB(150,175,210),Title="Fog color",Callback=function(v) KF.SkyFogColor=v end})
+    gSkyL:AddToggle("KH_SkyMatrix",{Text="Matrix Rain",Default=false,Callback=function(v) KF.SkyMatrix=v;if v then KF.SkyWeather="Rain" elseif KF.SkyWeather=="Rain" then KF.SkyWeather="Off" end end})
     gSkyR:AddSlider("KH_SkyClouds",{Text="Clouds %",Min=0,Max=100,Default=0,Rounding=0,Callback=function(v) KF.SkyClouds=v end})
     gSkyR:AddSlider("KH_SkyBloom",{Text="Bloom %",Min=0,Max=100,Default=20,Rounding=0,Callback=function(v) KF.SkyBloom=v end})
     gSkyR:AddSlider("KH_SkySunRays",{Text="Sun Rays %",Min=0,Max=100,Default=0,Rounding=0,Callback=function(v) KF.SkySunRays=v end})
     gSkyR:AddSlider("KH_SkySat",{Text="Saturation",Min=-100,Max=100,Default=0,Rounding=0,Callback=function(v) KF.SkySaturation=v end})
     gSkyR:AddSlider("KH_SkyContrast",{Text="Contrast",Min=-100,Max=100,Default=0,Rounding=0,Callback=function(v) KF.SkyContrast=v end})
     gSkyR:AddSlider("KH_SkyExposure",{Text="Exposure",Min=-30,Max=30,Default=0,Rounding=0,Callback=function(v) KF.SkyExposure=v end})
+    local skyPresetNames={}
+    for name in pairs(SKYBOX_PRESETS) do table.insert(skyPresetNames,name) end
+    table.sort(skyPresetNames)
+    gSkyR:AddDropdown("KH_SkyboxPreset",{Text="Skybox preset",Values=skyPresetNames,Default="Default",Callback=function(v) KF.SkyboxPreset=v end})
+    gSkyR:AddDropdown("KH_SkyDisabledElements",{Text="Hide sky elements",Values={"Sun","Moon","Stars"},Default={},Multi=true,Callback=function(v) KF.SkyDisabledElements=v end})
+    gSkyR:AddDropdown("KH_SkyWeather",{Text="Weather effect",Values={"Off","Rain","Snow","Light Rain","Stars","Hearts"},Default="Off",Callback=function(v) KF.SkyWeather=v end})
+    gSkyR:AddSlider("KH_SkyWeatherRate",{Text="Weather intensity",Min=0,Max=200,Default=100,Rounding=0,Suffix="%",Callback=function(v) KF.SkyWeatherRate=v end})
+    gSkyR:AddLabel("Weather color"):AddColorPicker("KH_SkyWeatherColor",{Default=Color3.fromRGB(255,255,255),Title="Weather color",Callback=function(v) KF.SkyWeatherColor=v end})
     gSkyR:AddDivider()
     gSkyR:AddToggle("KH_MapDark",{Text="Map Darkener",Default=false,Callback=function(v) KF.MapDarkener=v end})
     gSkyR:AddSlider("KH_Darkness",{Text="Darkness",Min=1,Max=10,Default=10,Rounding=0,Callback=function(v) KF.Darkness=v end})
@@ -16492,19 +16800,53 @@ return function(runtime,library)
     local function espColor(data,obj,c) if data.colors[obj]~=c then data.colors[obj]=c;obj.Color=c end end
 
     -- Sky helpers
-    local function makeSkyObj(class,name,parent) local o=Instance.new(class);o.Name=name;o.Parent=parent;return o end
-    local function removeRain() if rainPart then rainPart:Destroy();rainPart,_rainEmitter=nil,nil end end
-    local function ensureRain() if rainPart and rainPart.Parent then return end;rainPart=Instance.new("Part");rainPart.Name="KhangRain";rainPart.Anchored=true;rainPart.CanCollide=false;rainPart.CanQuery=false;rainPart.CanTouch=false;rainPart.CastShadow=false;rainPart.Transparency=1;rainPart.Size=Vector3.new(420,1,420);local em=Instance.new("ParticleEmitter");em.Rate=900;em.Lifetime=NumberRange.new(5,7);em.Speed=NumberRange.new(45,70);em.EmissionDirection=Enum.NormalId.Bottom;em.SpreadAngle=Vector2.new(0,0);em.LightEmission=1;em.LightInfluence=0;em.Color=ColorSequence.new(Color3.fromRGB(170,255,190),Color3.fromRGB(0,200,60));em.Parent=rainPart;_rainEmitter=em;rainPart.Parent=workspace end
-    local function applySky() local hue=(tick()%6)/6;Lighting.ClockTime=KF.SkyTime;Lighting.ColorShift_Top=KF.SkyRainbow and Color3.fromHSV(hue,0.6,1) or Color3.new(0,0,0);pcall(function() Lighting.ExposureCompensation=KF.SkyExposure/10 end);if (skyInst :: any).sky then (skyInst :: any).sky.StarCount=KF.SkyStars end;if (skyInst :: any).atmo then (skyInst :: any).atmo.Density=KF.SkyDensity/100;(skyInst :: any).atmo.Color=KF.SkyRainbow and Color3.fromHSV(hue,0.55,1) or Color3.fromRGB(170,200,255) end;if (skyInst :: any).clouds then (skyInst :: any).clouds.Enabled=KF.SkyClouds>0;(skyInst :: any).clouds.Cover=KF.SkyClouds/100 end;if (skyInst :: any).bloom then (skyInst :: any).bloom.Enabled=KF.SkyBloom>0;(skyInst :: any).bloom.Intensity=KF.SkyBloom/40 end;if (skyInst :: any).cc then (skyInst :: any).cc.Saturation=KF.SkySaturation/100;(skyInst :: any).cc.Contrast=KF.SkyContrast/100 end;if (skyInst :: any).rays then (skyInst :: any).rays.Enabled=KF.SkySunRays>0;(skyInst :: any).rays.Intensity=KF.SkySunRays/100*0.5 end;if KF.SkyMatrix then ensureRain() else removeRain() end end
-    local function enableSky() if skyActive then return end;skyActive=true;skyBackup={ClockTime=Lighting.ClockTime,ColorShift_Top=Lighting.ColorShift_Top};storedSkyObjects={};for _,child in ipairs(Lighting:GetChildren()) do if child:IsA("Sky") or child:IsA("Atmosphere") then table.insert(storedSkyObjects,{obj=child,parent=Lighting});child.Parent=nil end end;local terrain=workspace:FindFirstChildOfClass("Terrain");if terrain then for _,child in ipairs(terrain:GetChildren()) do if child:IsA("Clouds") then table.insert(storedSkyObjects,{obj=child,parent=terrain});child.Parent=nil end end end;skyInst.sky=makeSkyObj("Sky","KhangSky",Lighting);skyInst.atmo=makeSkyObj("Atmosphere","KhangAtmo",Lighting);if terrain then skyInst.clouds=makeSkyObj("Clouds","KhangClouds",terrain) end;skyInst.bloom=makeSkyObj("BloomEffect","KhangBloom",Lighting);skyInst.cc=makeSkyObj("ColorCorrectionEffect","KhangCC",Lighting);skyInst.rays=makeSkyObj("SunRaysEffect","KhangRays",Lighting);pcall(applySky) end
-    local function disableSky() if not skyActive then return end;skyActive=false;removeRain();for _,o in pairs(skyInst) do pcall(function() o:Destroy() end) end;skyInst={};for _,item in ipairs(storedSkyObjects or {}) do pcall(function() item.obj.Parent=item.parent end) end;storedSkyObjects={};if skyBackup then for k,v in pairs(skyBackup) do pcall(function() Lighting[k]=v end) end;skyBackup=(nil :: any) end end
+    local WorldFX = {}
+    WorldFX.makeSkyObj = function(class,name,parent) local o=Instance.new(class);o.Name=name;o.Parent=parent;return o end
+    WorldFX.removeRain = function() if rainPart then rainPart:Destroy();rainPart,_rainEmitter=nil,nil end end
+    WorldFX.ensureRain = function() if rainPart and rainPart.Parent then return end;rainPart=Instance.new("Part");rainPart.Name="KhangRain";rainPart.Anchored=true;rainPart.CanCollide=false;rainPart.CanQuery=false;rainPart.CanTouch=false;rainPart.CastShadow=false;rainPart.Transparency=1;rainPart.Size=Vector3.new(420,1,420);local em=Instance.new("ParticleEmitter");em.Rate=900;em.Lifetime=NumberRange.new(5,7);em.Speed=NumberRange.new(45,70);em.EmissionDirection=Enum.NormalId.Bottom;em.SpreadAngle=Vector2.new(0,0);em.LightEmission=1;em.LightInfluence=0;em.Color=ColorSequence.new(Color3.fromRGB(170,255,190),Color3.fromRGB(0,200,60));em.Parent=rainPart;_rainEmitter=em;rainPart.Parent=workspace end
+         WorldFX.updateSkybox = function()
+         local sky=(skyInst :: any).sky
+         if not sky then return end
+         local preset=SKYBOX_PRESETS[KF.SkyboxPreset] or SKYBOX_PRESETS.Default
+         sky.SkyboxBk=preset.SkyboxBk;sky.SkyboxDn=preset.SkyboxDn;sky.SkyboxFt=preset.SkyboxFt
+         sky.SkyboxLf=preset.SkyboxLf;sky.SkyboxRt=preset.SkyboxRt;sky.SkyboxUp=preset.SkyboxUp
+         sky.SunAngularSize=table.find(KF.SkyDisabledElements,'Sun') and 0 or 20
+         sky.MoonAngularSize=table.find(KF.SkyDisabledElements,'Moon') and 0 or 11
+         sky.StarCount=table.find(KF.SkyDisabledElements,'Stars') and 0 or KF.SkyStars
+     end
+     local SKY_WEATHER={
+         ['Rain']={Texture='rbxassetid://1822883048',Rate=600,Speed=60,Size=0.16,Life=1.2,Spread=0},
+         ['Snow']={Texture='rbxassetid://99851851',Rate=450,Speed=12,Size=0.35,Life=5,Spread=18},
+         ['Light Rain']={Texture='rbxasset://textures/particles/sparkles_main.dds',Rate=320,Speed=30,Size=0.12,Life=5,Spread=8},
+         ['Stars']={Texture='rbxassetid://6822501679',Rate=260,Speed=8,Size=0.28,Life=5,Spread=30},
+         ['Hearts']={Texture='rbxassetid://36721240',Rate=180,Speed=7,Size=0.32,Life=5,Spread=25},
+     }
+     WorldFX.updateSkyWeather = function()
+         if KF.SkyWeather=='Off' then WorldFX.removeRain();return end
+         WorldFX.ensureRain()
+         local cfg=SKY_WEATHER[KF.SkyWeather]
+         if _rainEmitter and cfg then
+             _rainEmitter.Texture=cfg.Texture
+             _rainEmitter.Rate=cfg.Rate*(KF.SkyWeatherRate/100)
+             _rainEmitter.Speed=NumberRange.new(cfg.Speed*0.85,cfg.Speed*1.15)
+             _rainEmitter.Size=NumberSequence.new(cfg.Size)
+             _rainEmitter.Lifetime=NumberRange.new(cfg.Life)
+             _rainEmitter.SpreadAngle=Vector2.new(cfg.Spread,cfg.Spread)
+             _rainEmitter.Color=ColorSequence.new(KF.SkyWeatherColor)
+             _rainEmitter.LightEmission=0.25
+             _rainEmitter.LightInfluence=0.2
+         end
+     end
+     WorldFX.applySky = function() local hue=(tick()%6)/6;Lighting.ClockTime=KF.SkyTime;Lighting.ColorShift_Top=KF.SkyRainbow and Color3.fromHSV(hue,0.6,1) or Color3.new(0,0,0);pcall(function() Lighting.ExposureCompensation=KF.SkyExposure/10 end);if KF.SkyAmbience then Lighting.Ambient=KF.SkyAmbientColor;Lighting.OutdoorAmbient=KF.SkyOutdoorColor end;if KF.SkyFog then Lighting.FogStart=KF.SkyFogStart;Lighting.FogEnd=KF.SkyFogEnd;Lighting.FogColor=KF.SkyFogColor end;if (skyInst :: any).sky then (skyInst :: any).sky.StarCount=KF.SkyStars end;if (skyInst :: any).atmo then (skyInst :: any).atmo.Density=KF.SkyDensity/100;(skyInst :: any).atmo.Color=KF.SkyRainbow and Color3.fromHSV(hue,0.55,1) or Color3.fromRGB(170,200,255) end;if (skyInst :: any).clouds then (skyInst :: any).clouds.Enabled=KF.SkyClouds>0;(skyInst :: any).clouds.Cover=KF.SkyClouds/100 end;if (skyInst :: any).bloom then (skyInst :: any).bloom.Enabled=KF.SkyBloom>0;(skyInst :: any).bloom.Intensity=KF.SkyBloom/40 end;if (skyInst :: any).cc then (skyInst :: any).cc.Saturation=KF.SkySaturation/100;(skyInst :: any).cc.Contrast=KF.SkyContrast/100 end;if (skyInst :: any).rays then (skyInst :: any).rays.Enabled=KF.SkySunRays>0;(skyInst :: any).rays.Intensity=KF.SkySunRays/100*0.5 end;WorldFX.updateSkybox();WorldFX.updateSkyWeather() end
+    WorldFX.enableSky = function() if skyActive then return end;skyActive=true;skyBackup={ClockTime=Lighting.ClockTime,ColorShift_Top=Lighting.ColorShift_Top,Ambient=Lighting.Ambient,OutdoorAmbient=Lighting.OutdoorAmbient,FogStart=Lighting.FogStart,FogEnd=Lighting.FogEnd,FogColor=Lighting.FogColor,ExposureCompensation=Lighting.ExposureCompensation};storedSkyObjects={};for _,child in ipairs(Lighting:GetChildren()) do if child:IsA("Sky") or child:IsA("Atmosphere") then table.insert(storedSkyObjects,{obj=child,parent=Lighting});child.Parent=nil end end;local terrain=workspace:FindFirstChildOfClass("Terrain");if terrain then for _,child in ipairs(terrain:GetChildren()) do if child:IsA("Clouds") then table.insert(storedSkyObjects,{obj=child,parent=terrain});child.Parent=nil end end end;skyInst.sky=WorldFX.makeSkyObj("Sky","KhangSky",Lighting);skyInst.atmo=WorldFX.makeSkyObj("Atmosphere","KhangAtmo",Lighting);if terrain then skyInst.clouds=WorldFX.makeSkyObj("Clouds","KhangClouds",terrain) end;skyInst.bloom=WorldFX.makeSkyObj("BloomEffect","KhangBloom",Lighting);skyInst.cc=WorldFX.makeSkyObj("ColorCorrectionEffect","KhangCC",Lighting);skyInst.rays=WorldFX.makeSkyObj("SunRaysEffect","KhangRays",Lighting);pcall(WorldFX.applySky) end
+    WorldFX.disableSky = function() if not skyActive then WorldFX.removeRain();return end;skyActive=false;WorldFX.removeRain();for _,o in pairs(skyInst) do pcall(function() o:Destroy() end) end;skyInst={};for _,item in ipairs(storedSkyObjects or {}) do pcall(function() item.obj.Parent=item.parent end) end;storedSkyObjects={};if skyBackup then for k,v in pairs(skyBackup) do pcall(function() Lighting[k]=v end) end;skyBackup=(nil :: any) end end
 
     -- Darkener
-    local function getDarkMult() return (10-KF.Darkness)*0.06 end
-    local function updateDarkLighting() if darkenerEnabled and not khangUnloaded then local m: any=getDarkMult();Lighting.Brightness=m;Lighting.OutdoorAmbient=Color3.fromRGB(math.floor(20*m),math.floor(20*m),math.floor(25*m));Lighting.Ambient=Color3.fromRGB(math.floor(15*m),math.floor(15*m),math.floor(20*m)) end end
-    local function darkenPart(part) if not part or not part:IsA("BasePart") or not part:IsDescendantOf(workspace) then return end;local model: any=part:FindFirstAncestorOfClass("Model");if model and Players:GetPlayerFromCharacter(model) then return end;if not origPartColors[part] then origPartColors[part]=part.Color end;local h,s,v=Color3.toHSV(origPartColors[part]);part.Color=Color3.fromHSV(h,s,math.clamp(v*getDarkMult(),0,1)) end
-    local function enableDarkener() if darkenerEnabled then return end;darkenerEnabled=true;origLighting={Brightness=Lighting.Brightness,OutdoorAmbient=Lighting.OutdoorAmbient,Ambient=Lighting.Ambient};updateDarkLighting();task.spawn(function() local items=workspace:GetDescendants();for i,v in ipairs(items) do if not darkenerEnabled or khangUnloaded then break end;pcall(darkenPart,v);if i%200==0 then task.wait() end end end);darkConn=workspace.DescendantAdded:Connect(function(o) if darkenerEnabled and o:IsA("BasePart") then task.defer(darkenPart,o) end end) end
-    local function disableDarkener() if not darkenerEnabled then return end;darkenerEnabled=false;if darkConn then darkConn:Disconnect();darkConn=nil end;pcall(function() if origLighting then for k,v in pairs(origLighting) do Lighting[k]=v end end end);origLighting=nil;local items={};for part,color in pairs(origPartColors) do items[#items+1]={part,color} end;origPartColors={};task.spawn(function() for i,item in ipairs(items) do if item[1] and item[1].Parent then pcall(function() item[1].Color=item[2] end) end;if i%500==0 then task.wait() end end end) end
+    WorldFX.getDarkMult = function() return (10-KF.Darkness)*0.06 end
+    WorldFX.updateDarkLighting = function() if darkenerEnabled and not khangUnloaded then local m: any=WorldFX.getDarkMult();Lighting.Brightness=m;Lighting.OutdoorAmbient=Color3.fromRGB(math.floor(20*m),math.floor(20*m),math.floor(25*m));Lighting.Ambient=Color3.fromRGB(math.floor(15*m),math.floor(15*m),math.floor(20*m)) end end
+    WorldFX.darkenPart = function(part) if not part or not part:IsA("BasePart") or not part:IsDescendantOf(workspace) then return end;local model: any=part:FindFirstAncestorOfClass("Model");if model and Players:GetPlayerFromCharacter(model) then return end;if not origPartColors[part] then origPartColors[part]=part.Color end;local h,s,v=Color3.toHSV(origPartColors[part]);part.Color=Color3.fromHSV(h,s,math.clamp(v*WorldFX.getDarkMult(),0,1)) end
+    WorldFX.enableDarkener = function() if darkenerEnabled then return end;darkenerEnabled=true;origLighting={Brightness=Lighting.Brightness,OutdoorAmbient=Lighting.OutdoorAmbient,Ambient=Lighting.Ambient};WorldFX.updateDarkLighting();task.spawn(function() local items=workspace:GetDescendants();for i,v in ipairs(items) do if not darkenerEnabled or khangUnloaded then break end;pcall(WorldFX.darkenPart,v);if i%200==0 then task.wait() end end end);darkConn=workspace.DescendantAdded:Connect(function(o) if darkenerEnabled and o:IsA("BasePart") then task.defer(WorldFX.darkenPart,o) end end) end
+    WorldFX.disableDarkener = function() if not darkenerEnabled then return end;darkenerEnabled=false;if darkConn then darkConn:Disconnect();darkConn=nil end;pcall(function() if origLighting then for k,v in pairs(origLighting) do Lighting[k]=v end end end);origLighting=nil;local items={};for part,color in pairs(origPartColors) do items[#items+1]={part,color} end;origPartColors={};task.spawn(function() for i,item in ipairs(items) do if item[1] and item[1].Parent then pcall(function() item[1].Color=item[2] end) end;if i%500==0 then task.wait() end end end) end
 
     -- FPS Boost
     local function enableBoost() if boostActive then return end;boostActive=true;pcall(function() settings().Rendering.QualityLevel=Enum.QualityLevel.Level01 end);pcall(function() boostLighting={GlobalShadows=Lighting.GlobalShadows};Lighting.GlobalShadows=false end);for _,child in ipairs(Lighting:GetChildren()) do if child:IsA("PostEffect") then boostEffects[child]=child.Enabled;child.Enabled=false end end;boostConn=workspace.DescendantAdded:Connect(function(v) if boostActive and v:IsA("BasePart") and not v:IsA("Terrain") then pcall(function() v.CastShadow=false end) end end) end
@@ -16596,7 +16938,7 @@ return function(runtime,library)
         if KF.FOVChanger then if not fovActive then savedFOV=Camera.FieldOfView;fovActive=true end;Camera.FieldOfView=KF.CameraFOV elseif fovActive then Camera.FieldOfView=savedFOV;fovActive=false end
 
         -- Sky
-        if KF.SkyChanger then if not skyActive then enableSky() end;if Lighting.ClockTime~=KF.SkyTime then Lighting.ClockTime=KF.SkyTime end;if rainPart then rainPart.CFrame=CFrame.new(Camera.CFrame.Position+Vector3.new(0,110,0)) end;skyTimer2=skyTimer2+dt;if KF.SkyRainbow or skyTimer2>=0.25 then skyTimer2=0;pcall(applySky) end elseif skyActive then disableSky() end
+        if KF.SkyChanger then if not skyActive then WorldFX.enableSky() end;if Lighting.ClockTime~=KF.SkyTime then Lighting.ClockTime=KF.SkyTime end;if rainPart then rainPart.CFrame=CFrame.new(Camera.CFrame.Position+Vector3.new(0,110,0)) end;skyTimer2=skyTimer2+dt;if KF.SkyRainbow or skyTimer2>=0.25 then skyTimer2=0;pcall(WorldFX.applySky) end elseif skyActive then WorldFX.disableSky() end
 
         -- FPS Boost
         if KF.FPSBoost and not boostActive then enableBoost() elseif not KF.FPSBoost and boostActive then disableBoost() end
@@ -16758,8 +17100,8 @@ return function(runtime,library)
             if KF.AntiAimMode==1 then aaYaw=aaYaw+math.rad(KF.AntiAimSpeed*20)*dt;yaw=aaYaw elseif KF.AntiAimMode==2 then aaFlip=not aaFlip;yaw=camYaw+(aaFlip and 1.5708 or -1.5708) elseif KF.AntiAimMode==3 then yaw=camYaw+math.pi else yaw=math.rad(math.random(0,359)) end
             root.CFrame=CFrame.new(root.Position)*CFrame.Angles(0,yaw,0)
         elseif aaActive then aaActive=false;if hum then hum.AutoRotate=aaSaved end end
-        if KF.MapDarkener and not darkenerEnabled then enableDarkener() elseif not KF.MapDarkener and darkenerEnabled then disableDarkener() end
-        if darkenerEnabled and KF.Darkness then updateDarkLighting() end
+        if KF.MapDarkener and not darkenerEnabled then WorldFX.enableDarkener() elseif not KF.MapDarkener and darkenerEnabled then WorldFX.disableDarkener() end
+        if darkenerEnabled and KF.Darkness then WorldFX.updateDarkLighting() end
     end)
 
     -- THIRD PERSON
@@ -16785,6 +17127,12 @@ return function(runtime,library)
 
     if library.OnUnload then library:OnUnload(function()
         khangUnloaded=true
+        if dashInputConn then pcall(function() dashInputConn:Disconnect() end) end
+        if dashTween then pcall(function() dashTween:Cancel() end) end
+        if dashOrigin then local root=getRoot();if root and root.Parent then pcall(function() root.CFrame=dashOrigin end) end end
+        pcall(WorldFX.disableSky)
+        pcall(WorldFX.disableDarkener)
+        pcall(disableBoost)
         pcall(function() RunService:UnbindFromRenderStep("KhangTP") end)
         for part,original in pairs(noclipBack) do
             if part and part.Parent then pcall(function() part.CanCollide=original end) end
