@@ -6713,21 +6713,73 @@ end
         if not self.Alive then return end
         self.Alive=false
         config._stopped=true
-        if self.Backend then self.Backend:Destroy()end
-        if self.StopPlex then self:StopPlex()end
+        if self.Backend then pcall(self.Backend.Destroy,self.Backend)end
+        if self.StopPlex then pcall(self.StopPlex,self)end
         if self.Library and self.Library.Unload then pcall(self.Library.Unload,self.Library)end
+        pcall(function() game:GetService("RunService"):UnbindFromRenderStep("KhangTP") end)
+        -- Remove the UI regardless of whether the library parented it to CoreGui or PlayerGui.
+        pcall(function()
+            local Players=game:GetService("Players")
+            local containers={game:GetService("CoreGui")}
+            local player=Players.LocalPlayer
+            if player then
+                local playerGui=player:FindFirstChildOfClass("PlayerGui")
+                if playerGui then containers[#containers+1]=playerGui end
+            end
+            for _,container in ipairs(containers) do
+                for _,name in ipairs({"Obsidian","Khang Hub","KhangHub","Khang Hub Fixed UI"}) do
+                    local old=container:FindFirstChild(name)
+                    if old then old:Destroy() end
+                end
+                -- Catch duplicate/nested copies left behind by a partial initialization.
+                for _,obj in ipairs(container:GetDescendants()) do
+                    if obj:IsA("ScreenGui") and (obj.Name=="Obsidian" or obj.Name=="Khang Hub" or obj.Name=="KhangHub" or obj.Name=="Khang Hub Fixed UI") then
+                        pcall(function() obj:Destroy() end)
+                    end
+                end
+            end
+        end)
+        local env=getgenv and getgenv()or globalEnv
+        if env.__KhangHubSession==self then env.__KhangHubSession=nil end
+        if env.KhangRuntime==self then env.KhangRuntime=nil end
+        if env.YabujinRecovered==self then env.YabujinRecovered=nil end
     end
     return KhangDeobfuscated
 end
 local environment=getgenv and getgenv()or globalEnv
 local options=environment.__YabujinOptions or {}
-local previous=environment.YabujinRecovered
-if previous and previous.Unload then pcall(previous.Unload,previous)end
+-- Single-instance guard: unload the previous Khang Hub before creating a new one.
+local previous=environment.__KhangHubSession or environment.KhangRuntime or environment.YabujinRecovered
+if previous and type(previous.Unload)=="function" then
+    pcall(previous.Unload,previous)
+end
+-- Fallback cleanup for a leftover UI if the previous runtime was partially initialized.
+pcall(function()
+    local Players=game:GetService("Players")
+    local containers={game:GetService("CoreGui")}
+    local player=Players.LocalPlayer
+    if player then
+        local playerGui=player:FindFirstChildOfClass("PlayerGui")
+        if playerGui then containers[#containers+1]=playerGui end
+    end
+    for _,container in ipairs(containers) do
+        for _,name in ipairs({"Obsidian","Khang Hub","KhangHub","Khang Hub Fixed UI"}) do
+            local old=container:FindFirstChild(name)
+            if old then old:Destroy() end
+        end
+        for _,obj in ipairs(container:GetDescendants()) do
+            if obj:IsA("ScreenGui") and (obj.Name=="Obsidian" or obj.Name=="Khang Hub" or obj.Name=="KhangHub" or obj.Name=="Khang Hub Fixed UI") then
+                pcall(function() obj:Destroy() end)
+            end
+        end
+    end
+end)
 local runtime=createRuntime(options.Dependencies)
 runtime.New=createRuntime
 runtime.SourceStatus="Recovered functions with dependency bindings; original client startup and some upvalues were not included."
 environment.YabujinRecovered=runtime
 environment.KhangRuntime=runtime
+environment.__KhangHubSession=runtime
 function runtime:StartUI()
     if self.Library then return self.Library end
     local ok,library=self:Call("initKhangObsidianLibrary")
@@ -15334,7 +15386,7 @@ return function(runtime,library)
         ShowInfo=true,ShowHealthBar=false,MaxDistance=1000,ESPRate=40,LowLag=true,
         Aimbot=false,HoldRMB=true,WallCheck=true,AimbotFOV=120,AimbotSmooth=20,
         AimbotSticky=50,AimbotShowCircle=false,
-        SilentAim=false,FOV=150,AimOffset=0,SilentRange=1000,SilentHitChance=100,
+        SilentAim=false,SilentShowCircle=false,FOV=150,AimOffset=0,SilentRange=1000,SilentHitChance=100,
         SilentHeadChance=100,SilentWallCheck=true,SilentAutoFire=false,SilentPart=1,SilentSticky=true,
         TriggerBot=false,TriggerDelay=0,TriggerRMB=false,TriggerDistance=1000,TriggerWallCheck=true,
         AimLock=false,LockHold=true,LockPart=1,LockFOV=200,LockRange=1000,LockSmooth=0,LockWall=true,
@@ -15506,6 +15558,7 @@ return function(runtime,library)
     gAimL:AddToggle("KH_WallCheck",{Text="Wall Check",Default=true,Callback=function(v) KF.WallCheck=v end})
     gAimL:AddToggle("KH_TeamCheck",{Text="Team Check",Default=true,Callback=function(v) KF.TeamCheck=v end})
     gAimL:AddSlider("KH_AimFOV",{Text="FOV",Min=30,Max=500,Default=120,Rounding=0,Callback=function(v) KF.AimbotFOV=v end})
+    gAimL:AddToggle("KH_AimShowFOV",{Text="Show Aimbot FOV",Default=false,Callback=function(v) KF.AimbotShowCircle=v end})
     gAimL:AddSlider("KH_AimSmooth",{Text="Smoothness",Min=1,Max=100,Default=20,Rounding=0,Callback=function(v) KF.AimbotSmooth=v end})
     gAimL:AddDropdown("KH_AimPart",{Text="Aim Part",Values={"Head","UpperTorso","LowerTorso","HumanoidRootPart","LeftUpperArm","RightUpperArm","LeftUpperLeg","RightUpperLeg"},Default="Head",Callback=function(v) for i,name in ipairs(COMBAT_AIM_PARTS) do if name==v then KF.AimPart=i;break end end end})
     gAimL:AddSlider("KH_AimDist",{Text="Max Distance",Min=100,Max=2000,Default=1000,Rounding=0,Callback=function(v) KF.MaxDistance=v end})
@@ -15525,6 +15578,7 @@ return function(runtime,library)
     gAimL:AddSlider("KH_RageCPS",{Text="Rage CPS",Min=1,Max=30,Default=15,Rounding=0,Callback=function(v) KF.RageCPS=v end})
     gAimR:AddToggle("KH_Silent",{Text="Silent Aim",Default=false,Callback=function(v) KF.SilentAim=v end})
     gAimR:AddSlider("KH_SilentFOV",{Text="FOV",Min=50,Max=500,Default=150,Rounding=0,Callback=function(v) KF.FOV=v end})
+    gAimR:AddToggle("KH_SilentShowFOV",{Text="Show Silent Aim FOV",Default=false,Callback=function(v) KF.SilentShowCircle=v end})
     gAimR:AddSlider("KH_SilentRange",{Text="Range",Min=50,Max=2000,Default=1000,Rounding=0,Callback=function(v) KF.SilentRange=v end})
     gAimR:AddSlider("KH_HitChance",{Text="Hit Chance %",Min=0,Max=100,Default=100,Rounding=0,Callback=function(v) KF.SilentHitChance=v end})
     gAimR:AddSlider("KH_HeadChance",{Text="Headshot %",Min=0,Max=100,Default=100,Rounding=0,Callback=function(v) KF.SilentHeadChance=v end})
@@ -16255,17 +16309,21 @@ return function(runtime,library)
 
     local weaponGroup = tabCombat:AddRightGroupbox("Weapon Mods")
     local function onWeaponModsChange()
-        if not WeaponMods.Apply() then
-            library:Notify("Vào trận rồi bật lại Weapon Mods.", 4)
+        local enabled=false
+        for _,key in ipairs({"P4S1T1","P4S1T2","P4S1T4","P4S2T2","P4S2T3","P4S2T4","P4S1T5","P4S1T6"}) do
+            local toggle=library.Toggles[key]
+            if toggle and toggle.Value then enabled=true;break end
         end
+        if not enabled then WeaponMods.RestoreAll();return end
+        if not WeaponMods.Apply() then library:Notify("Vào trận rồi bật lại Weapon Mods.", 4) end
     end
 
-    weaponGroup:AddToggle("P4S1T1", { Text = "Weapon Attack Speed", Default = true, Callback = onWeaponModsChange })
+    weaponGroup:AddToggle("P4S1T1", { Text = "Weapon Attack Speed", Default = false, Callback = onWeaponModsChange })
     local depSpeed = weaponGroup:AddDependencyBox()
     depSpeed:AddSlider("P4S1S4", { Text = "Speed Boost", Default = 85, Min = 0, Max = 85, Rounding = 0, Suffix = "%", Compact = true, Callback = onWeaponModsChange })
     depSpeed:SetupDependencies({ { library.Toggles.P4S1T1, true } })
 
-    weaponGroup:AddToggle("P4S1T2", { Text = "Faster Reload", Default = true, Callback = onWeaponModsChange })
+    weaponGroup:AddToggle("P4S1T2", { Text = "Faster Reload", Default = false, Callback = onWeaponModsChange })
     local depReload = weaponGroup:AddDependencyBox()
     depReload:AddSlider("P4S1S3", { Text = "Reload Faster", Default = 20, Min = 0, Max = 20, Rounding = 0, Suffix = "%", Compact = true, Callback = onWeaponModsChange })
     depReload:SetupDependencies({ { library.Toggles.P4S1T2, true } })
@@ -16275,12 +16333,12 @@ return function(runtime,library)
     depRecoil:AddSlider("P4S1S2", { Text = "Recoil Reduction", Default = 100, Min = 0, Max = 100, Rounding = 0, Suffix = "%", Compact = true, Callback = onWeaponModsChange })
     depRecoil:SetupDependencies({ { library.Toggles.P4S1T4, true } })
 
-    weaponGroup:AddToggle("P4S2T2", { Text = "Faster ADS", Default = true, Callback = onWeaponModsChange })
+    weaponGroup:AddToggle("P4S2T2", { Text = "Faster ADS", Default = false, Callback = onWeaponModsChange })
     local depAds = weaponGroup:AddDependencyBox()
     depAds:AddSlider("P4S2S2", { Text = "ADS Faster", Default = 85, Min = 0, Max = 85, Rounding = 0, Suffix = "%", Compact = true, Callback = onWeaponModsChange })
     depAds:SetupDependencies({ { library.Toggles.P4S2T2, true } })
 
-    weaponGroup:AddToggle("P4S2T3", { Text = "Faster Equip", Default = true, Callback = onWeaponModsChange })
+    weaponGroup:AddToggle("P4S2T3", { Text = "Faster Equip", Default = false, Callback = onWeaponModsChange })
     local depEquip = weaponGroup:AddDependencyBox()
     depEquip:AddSlider("P4S2S3", { Text = "Equip Faster", Default = 80, Min = 0, Max = 80, Rounding = 0, Suffix = "%", Compact = true, Callback = onWeaponModsChange })
     depEquip:SetupDependencies({ { library.Toggles.P4S2T3, true } })
@@ -16301,7 +16359,7 @@ return function(runtime,library)
         WeaponMods.RestoreAll()
     end)
 
-    onWeaponModsChange()
+    -- Weapon Mods stay disabled until the user enables a toggle.
 
     -- ESP in Visuals tab
     local gESP=tabs.Visuals:AddLeftGroupbox("ESP")
@@ -16377,7 +16435,7 @@ return function(runtime,library)
     local strafeTargetHumanoid=nil
     local damageEscapeLastHealth=nil
     local damageEscapeCooldown=0
-    local noclipActive,noclipParts,noclipRefresh,noclipChar={},0,nil
+    local noclipActive,noclipParts,noclipRefresh,noclipChar=false,{},0,nil
     local skyActive=false;local skyBackup,storedSkyObjects,skyInst={},nil,{}
     local rainPart,_rainEmitter=nil,nil;local skyTimer2=0
     local darkenerEnabled=false;local origPartColors={};local origLighting=nil;local darkConn=nil
@@ -16465,8 +16523,8 @@ return function(runtime,library)
         if scanDue then scanTimer=0 end
 
         -- FOV circles
-        if KF.SilentAim then kFOVCircle.Position=center;kFOVCircle.Radius=KF.FOV;kFOVCircle.Visible=true else kFOVCircle.Visible=false end
-        kAimCircle.Visible=false
+        kFOVCircle.Position=center;kFOVCircle.Radius=KF.FOV;kFOVCircle.Visible=KF.SilentShowCircle
+        kAimCircle.Position=center;kAimCircle.Radius=KF.AimbotFOV;kAimCircle.Visible=KF.AimbotShowCircle
 
         if KF.SilentAim or KF.RageBot then ensureSilentHooks() end
 
@@ -16726,7 +16784,20 @@ return function(runtime,library)
 
 
     if library.OnUnload then library:OnUnload(function()
+        khangUnloaded=true
+        pcall(function() RunService:UnbindFromRenderStep("KhangTP") end)
+        for part,original in pairs(noclipBack) do
+            if part and part.Parent then pcall(function() part.CanCollide=original end) end
+            noclipBack[part]=nil
+        end
+        pcall(function() kFOVCircle.Visible=false;kFOVCircle:Remove() end)
+        pcall(function() kAimCircle.Visible=false;kAimCircle:Remove() end)
+        pcall(function() kFPSText.Visible=false;kFPSText:Remove() end)
         backend:Destroy();runtime:StopPlex();runtime.Alive=false
+        local env=getgenv and getgenv()or _G
+        if env.__KhangHubSession==runtime then env.__KhangHubSession=nil end
+        if env.KhangRuntime==runtime then env.KhangRuntime=nil end
+        if env.YabujinRecovered==runtime then env.YabujinRecovered=nil end
     end)end
 
     -- Re-select the first tab after every groupbox/control has been registered.
