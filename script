@@ -15334,7 +15334,7 @@ return function(runtime,library)
         ShowInfo=true,ShowHealthBar=false,MaxDistance=1000,ESPRate=40,LowLag=true,
         Aimbot=false,HoldRMB=true,WallCheck=true,AimbotFOV=120,AimbotSmooth=20,
         AimbotSticky=50,AimbotShowCircle=false,
-        SilentAim=false,SilentShowCircle=true,FOV=150,AimOffset=0,SilentRange=1000,SilentHitChance=100,
+        SilentAim=false,FOV=150,AimOffset=0,SilentRange=1000,SilentHitChance=100,
         SilentHeadChance=100,SilentWallCheck=true,SilentAutoFire=false,SilentPart=1,SilentSticky=true,
         TriggerBot=false,TriggerDelay=0,TriggerRMB=false,TriggerDistance=1000,TriggerWallCheck=true,
         AimLock=false,LockHold=true,LockPart=1,LockFOV=200,LockRange=1000,LockSmooth=0,LockWall=true,
@@ -15343,6 +15343,7 @@ return function(runtime,library)
         Noclip=false,Fly=false,FlySpeed=60,AntiAFK=false,
         AntiAim=false,AntiAimMode=1,AntiAimSpeed=50,
         TargetStrafe=false,StrafeRange=1000,StrafeMode="Above Head",StrafeRadius=8,StrafeHeight=12,StrafeFace=true,
+        DamageEscape=false,DamageEscapeDistance=40,
         Chams=false,Fullbright=false,FOVChanger=false,CameraFOV=90,
         ThirdPerson=false,TPDistance=12,ShowFPS=false,FPSBoost=false,
         SkyChanger=false,SkyTime=18,SkyStars=0,SkyDensity=35,SkyRainbow=false,SkyClouds=0,
@@ -15353,7 +15354,73 @@ return function(runtime,library)
 
     -- Helpers
     local espObjects,chams={},{}
-    local function isEnemy(p) if not KF.TeamCheck then return true end; if not p.Team or not LocalPlayer.Team then return true end; return p.Team~=LocalPlayer.Team end
+    local function readTeamIdentity(player)
+        -- Different games expose team identity through Player.Team, attributes,
+        -- TeamColor, or StringValue/IntValue markers on Player/Character.
+        local team=player.Team
+        if team then return "team-instance",team end
+        local attributeNames={"TeamId","TeamID","TeamName","Team","teamId","teamName","team"}
+        for _,name in ipairs(attributeNames) do
+            local value=player:GetAttribute(name)
+            if value~=nil and value~="" then return "attribute:"..name,tostring(value) end
+        end
+        local character=player.Character
+        if character then
+            for _,name in ipairs(attributeNames) do
+                local value=character:GetAttribute(name)
+                if value~=nil and value~="" then return "character-attribute:"..name,tostring(value) end
+            end
+        end
+        local containers={player,character}
+        for _,container in ipairs(containers) do
+            if container then
+                for _,name in ipairs({"Team","TeamId","TeamID","TeamName","team","teamId"}) do
+                    local marker=container:FindFirstChild(name)
+                    if marker and (marker:IsA("StringValue") or marker:IsA("IntValue") or marker:IsA("NumberValue") or marker:IsA("ObjectValue")) then
+                        local value=marker.Value
+                        if value~=nil and value~="" then return "value:"..name,tostring(value) end
+                    end
+                end
+            end
+        end
+        return nil,nil
+    end
+    local function isEnemy(p)
+        if not p or p==LocalPlayer then return false end
+        if not KF.TeamCheck then return true end
+
+        -- An explicit shared team identity always means teammate.
+        local myKind,myTeam=readTeamIdentity(LocalPlayer)
+        local theirKind,theirTeam=readTeamIdentity(p)
+        if myTeam~=nil and theirTeam~=nil then
+            if myKind==theirKind and myTeam==theirTeam then return false end
+            if myKind==theirKind then return true end
+        end
+
+        -- A Neutral/non-Neutral pair cannot be on the same assigned team.
+        local myNeutral=LocalPlayer.Neutral
+        local theirNeutral=p.Neutral
+        if myNeutral~=theirNeutral and (myNeutral==true or myNeutral==false) and (theirNeutral==true or theirNeutral==false) then
+            return true
+        end
+
+        -- TeamColor is useful when Player.Team is not populated. Avoid treating
+        -- default white Neutral players as a team in free-for-all games.
+        local myColor=LocalPlayer.TeamColor
+        local theirColor=p.TeamColor
+        if myColor and theirColor and myColor==theirColor then
+            local defaultNeutral=(myNeutral==true and theirNeutral==true and myColor==BrickColor.new("White"))
+            if not defaultNeutral and (myNeutral==false or theirNeutral==false or myColor~=BrickColor.new("White")) then
+                return false
+            end
+        elseif myColor and theirColor and myColor~=theirColor then
+            if myNeutral==false and theirNeutral==false then return true end
+        end
+
+        -- If the game exposes no team metadata (typical FFA/Neutral setup),
+        -- treat the player as an opponent rather than disabling all targeting.
+        return true
+    end
     local cachedHum,cachedRoot
     local function getHum() local c=LocalPlayer.Character;if not c then return nil end;if not cachedHum or cachedHum.Parent~=c then cachedHum=c:FindFirstChildOfClass("Humanoid") end;return cachedHum end
     local function getRoot() local c=LocalPlayer.Character;if not c then return nil end;if not cachedRoot or cachedRoot.Parent~=c then cachedRoot=c:FindFirstChild("HumanoidRootPart") end;return cachedRoot end
@@ -15440,11 +15507,7 @@ return function(runtime,library)
     gAimL:AddToggle("KH_TeamCheck",{Text="Team Check",Default=true,Callback=function(v) KF.TeamCheck=v end})
     gAimL:AddSlider("KH_AimFOV",{Text="FOV",Min=30,Max=500,Default=120,Rounding=0,Callback=function(v) KF.AimbotFOV=v end})
     gAimL:AddSlider("KH_AimSmooth",{Text="Smoothness",Min=1,Max=100,Default=20,Rounding=0,Callback=function(v) KF.AimbotSmooth=v end})
-    gAimL:AddDropdown("KH_AimPart",{Text="Aim Part",Values=COMBAT_AIM_PARTS,Default="Head",Callback=function(v)
-        local index=table.find(COMBAT_AIM_PARTS,v)
-        if index then KF.AimPart=index end
-    end})
-    gAimL:AddToggle("KH_AimCircle",{Text="Show Aimbot FOV Circle",Default=false,Callback=function(v) KF.AimbotShowCircle=v end})
+    gAimL:AddDropdown("KH_AimPart",{Text="Aim Part",Values={"Head","UpperTorso","LowerTorso","HumanoidRootPart","LeftUpperArm","RightUpperArm","LeftUpperLeg","RightUpperLeg"},Default="Head",Callback=function(v) for i,name in ipairs(COMBAT_AIM_PARTS) do if name==v then KF.AimPart=i;break end end end})
     gAimL:AddSlider("KH_AimDist",{Text="Max Distance",Min=100,Max=2000,Default=1000,Rounding=0,Callback=function(v) KF.MaxDistance=v end})
     gAimL:AddDivider()
     gAimL:AddToggle("KH_TriggerBot",{Text="Trigger Bot",Default=false,Callback=function(v) KF.TriggerBot=v end})
@@ -15461,7 +15524,6 @@ return function(runtime,library)
     gAimL:AddSlider("KH_RageRange",{Text="Rage Range",Min=50,Max=3000,Default=1000,Rounding=0,Callback=function(v) KF.RageRange=v end})
     gAimL:AddSlider("KH_RageCPS",{Text="Rage CPS",Min=1,Max=30,Default=15,Rounding=0,Callback=function(v) KF.RageCPS=v end})
     gAimR:AddToggle("KH_Silent",{Text="Silent Aim",Default=false,Callback=function(v) KF.SilentAim=v end})
-    gAimR:AddToggle("KH_SilentCircle",{Text="Show Silent Aim FOV Circle",Default=true,Callback=function(v) KF.SilentShowCircle=v end})
     gAimR:AddSlider("KH_SilentFOV",{Text="FOV",Min=50,Max=500,Default=150,Rounding=0,Callback=function(v) KF.FOV=v end})
     gAimR:AddSlider("KH_SilentRange",{Text="Range",Min=50,Max=2000,Default=1000,Rounding=0,Callback=function(v) KF.SilentRange=v end})
     gAimR:AddSlider("KH_HitChance",{Text="Hit Chance %",Min=0,Max=100,Default=100,Rounding=0,Callback=function(v) KF.SilentHitChance=v end})
@@ -16193,30 +16255,17 @@ return function(runtime,library)
 
     local weaponGroup = tabCombat:AddRightGroupbox("Weapon Mods")
     local function onWeaponModsChange()
-        local ids = { "P4S1T1", "P4S1T2", "P4S1T4", "P4S2T2", "P4S2T3", "P4S2T4", "P4S1T5", "P4S1T6", "P4S1T7" }
-        local enabled = false
-        for _, id in ipairs(ids) do
-            local toggle = library.Toggles[id]
-            if toggle and toggle.Value == true then
-                enabled = true
-                break
-            end
-        end
-        if not enabled then
-            WeaponMods.RestoreAll()
-            return
-        end
         if not WeaponMods.Apply() then
             library:Notify("Vào trận rồi bật lại Weapon Mods.", 4)
         end
     end
 
-    weaponGroup:AddToggle("P4S1T1", { Text = "Weapon Attack Speed", Default = false, Callback = onWeaponModsChange })
+    weaponGroup:AddToggle("P4S1T1", { Text = "Weapon Attack Speed", Default = true, Callback = onWeaponModsChange })
     local depSpeed = weaponGroup:AddDependencyBox()
     depSpeed:AddSlider("P4S1S4", { Text = "Speed Boost", Default = 85, Min = 0, Max = 85, Rounding = 0, Suffix = "%", Compact = true, Callback = onWeaponModsChange })
     depSpeed:SetupDependencies({ { library.Toggles.P4S1T1, true } })
 
-    weaponGroup:AddToggle("P4S1T2", { Text = "Faster Reload", Default = false, Callback = onWeaponModsChange })
+    weaponGroup:AddToggle("P4S1T2", { Text = "Faster Reload", Default = true, Callback = onWeaponModsChange })
     local depReload = weaponGroup:AddDependencyBox()
     depReload:AddSlider("P4S1S3", { Text = "Reload Faster", Default = 20, Min = 0, Max = 20, Rounding = 0, Suffix = "%", Compact = true, Callback = onWeaponModsChange })
     depReload:SetupDependencies({ { library.Toggles.P4S1T2, true } })
@@ -16226,12 +16275,12 @@ return function(runtime,library)
     depRecoil:AddSlider("P4S1S2", { Text = "Recoil Reduction", Default = 100, Min = 0, Max = 100, Rounding = 0, Suffix = "%", Compact = true, Callback = onWeaponModsChange })
     depRecoil:SetupDependencies({ { library.Toggles.P4S1T4, true } })
 
-    weaponGroup:AddToggle("P4S2T2", { Text = "Faster ADS", Default = false, Callback = onWeaponModsChange })
+    weaponGroup:AddToggle("P4S2T2", { Text = "Faster ADS", Default = true, Callback = onWeaponModsChange })
     local depAds = weaponGroup:AddDependencyBox()
     depAds:AddSlider("P4S2S2", { Text = "ADS Faster", Default = 85, Min = 0, Max = 85, Rounding = 0, Suffix = "%", Compact = true, Callback = onWeaponModsChange })
     depAds:SetupDependencies({ { library.Toggles.P4S2T2, true } })
 
-    weaponGroup:AddToggle("P4S2T3", { Text = "Faster Equip", Default = false, Callback = onWeaponModsChange })
+    weaponGroup:AddToggle("P4S2T3", { Text = "Faster Equip", Default = true, Callback = onWeaponModsChange })
     local depEquip = weaponGroup:AddDependencyBox()
     depEquip:AddSlider("P4S2S3", { Text = "Equip Faster", Default = 80, Min = 0, Max = 80, Rounding = 0, Suffix = "%", Compact = true, Callback = onWeaponModsChange })
     depEquip:SetupDependencies({ { library.Toggles.P4S2T3, true } })
@@ -16252,7 +16301,7 @@ return function(runtime,library)
         WeaponMods.RestoreAll()
     end)
 
-    -- Weapon Mods start fully disabled; only apply after the user enables a toggle.
+    onWeaponModsChange()
 
     -- ESP in Visuals tab
     local gESP=tabs.Visuals:AddLeftGroupbox("ESP")
@@ -16285,6 +16334,8 @@ return function(runtime,library)
     gMoveL:AddToggle("KH_Fly",{Text="Fly",Default=false,Callback=function(v) KF.Fly=v end})
     gMoveL:AddSlider("KH_FlySpeed",{Text="Fly Speed",Min=10,Max=200,Default=60,Rounding=0,Callback=function(v) KF.FlySpeed=v end})
     gMoveL:AddToggle("KH_AntiAFK",{Text="Anti AFK",Default=false,Callback=function(v) KF.AntiAFK=v end})
+    gMoveL:AddToggle("KH_DamageEscape",{Text="Damage Escape",Default=false,Callback=function(v) KF.DamageEscape=v end})
+    gMoveL:AddSlider("KH_DamageEscapeDistance",{Text="Escape Distance",Min=10,Max=100,Default=40,Rounding=0,Callback=function(v) KF.DamageEscapeDistance=v end})
     gMoveR:AddToggle("KH_AntiAim",{Text="Anti Aim",Default=false,Callback=function(v) KF.AntiAim=v end})
     gMoveR:AddSlider("KH_AntiAimSpeed",{Text="Spin Speed",Min=1,Max=100,Default=50,Rounding=0,Callback=function(v) KF.AntiAimSpeed=v end})
     gMoveR:AddToggle("KH_TargetStrafe",{Text="Target Strafe",Default=false,Callback=function(v) KF.TargetStrafe=v end})
@@ -16324,6 +16375,8 @@ return function(runtime,library)
     local aaYaw,aaFlip,aaActive,aaSaved=0,false,false,true
     local strafeAngle,strafeTarget=0,nil
     local strafeTargetHumanoid=nil
+    local damageEscapeLastHealth=nil
+    local damageEscapeCooldown=0
     local noclipActive,noclipParts,noclipRefresh,noclipChar={},0,nil
     local skyActive=false;local skyBackup,storedSkyObjects,skyInst={},nil,{}
     local rainPart,_rainEmitter=nil,nil;local skyTimer2=0
@@ -16412,16 +16465,8 @@ return function(runtime,library)
         if scanDue then scanTimer=0 end
 
         -- FOV circles
-        if KF.SilentAim and KF.SilentShowCircle then
-            kFOVCircle.Position=center;kFOVCircle.Radius=KF.FOV;kFOVCircle.Visible=true
-        else
-            kFOVCircle.Visible=false
-        end
-        if KF.Aimbot and KF.AimbotShowCircle then
-            kAimCircle.Position=center;kAimCircle.Radius=KF.AimbotFOV;kAimCircle.Visible=true
-        else
-            kAimCircle.Visible=false
-        end
+        if KF.SilentAim then kFOVCircle.Position=center;kFOVCircle.Radius=KF.FOV;kFOVCircle.Visible=true else kFOVCircle.Visible=false end
+        kAimCircle.Visible=false
 
         if KF.SilentAim or KF.RageBot then ensureSilentHooks() end
 
@@ -16552,6 +16597,40 @@ return function(runtime,library)
         if khangUnloaded then return end
         local hum,root=getHum(),getRoot()
         local alive=hum and root and hum.Health>0
+        -- Damage Escape: when health drops, dash away from the nearest living enemy.
+        if hum and root and alive then
+            if damageEscapeLastHealth==nil then damageEscapeLastHealth=hum.Health end
+            damageEscapeCooldown=math.max(0,damageEscapeCooldown-dt)
+            if KF.DamageEscape and hum.Health<damageEscapeLastHealth and damageEscapeCooldown<=0 then
+                local nearestEnemy,nearestDistance=nil,math.huge
+                for _,pl in ipairs(Players:GetPlayers()) do
+                    if pl~=LocalPlayer and isEnemy(pl) and pl.Character then
+                        local er=pl.Character:FindFirstChild("HumanoidRootPart")
+                        local eh=pl.Character:FindFirstChildOfClass("Humanoid")
+                        if er and eh and eh.Health>0 then
+                            local d=(er.Position-root.Position).Magnitude
+                            if d<nearestDistance then nearestDistance=d;nearestEnemy=er end
+                        end
+                    end
+                end
+                local away
+                if nearestEnemy then
+                    local delta=root.Position-nearestEnemy.Position
+                    away=delta.Magnitude>0.01 and delta.Unit or -root.CFrame.LookVector
+                else
+                    away=-root.CFrame.LookVector
+                end
+                local destination=root.Position+away*KF.DamageEscapeDistance+Vector3.new(0,8,0)
+                root.CFrame=CFrame.new(destination,destination+root.CFrame.LookVector)
+                root.AssemblyLinearVelocity=Vector3.new(away.X*35,45,away.Z*35)
+                damageEscapeCooldown=1.25
+            end
+            damageEscapeLastHealth=hum.Health
+        elseif hum then
+            damageEscapeLastHealth=hum.Health
+        else
+            damageEscapeLastHealth=nil
+        end
         if KF.Speed and hum and root and not KF.Fly then local md=hum.MoveDirection;if md.Magnitude>0 then root.CFrame=root.CFrame+md.Unit*math.max(KF.SpeedValue-16,0)*dt end end
         if KF.JumpHack and hum and root then if hum:GetState()==Enum.HumanoidStateType.Jumping then if not jumpApplied then jumpApplied=true;local v=root.AssemblyLinearVelocity;root.AssemblyLinearVelocity=Vector3.new(v.X,KF.JumpValue,v.Z) end else jumpApplied=false end end
         if KF.Fly and hum and root then
@@ -16569,8 +16648,7 @@ return function(runtime,library)
             end
             local nearestRoot,nearestHumanoid,nearestDistance=nil,nil,KF.StrafeRange
             for _,pl in ipairs(Players:GetPlayers()) do
-                local sameTeam=(pl.Team~=nil and LocalPlayer.Team~=nil and pl.Team==LocalPlayer.Team)
-                if pl~=LocalPlayer and not sameTeam and pl.Character then
+                if pl~=LocalPlayer and isEnemy(pl) and pl.Character then
                     local candidateRoot=pl.Character:FindFirstChild("HumanoidRootPart")
                     local candidateHum=pl.Character:FindFirstChildOfClass("Humanoid")
                     if candidateRoot and candidateHum and candidateHum.Health>0 then
@@ -16586,20 +16664,31 @@ return function(runtime,library)
             strafeTarget=nearestRoot
             strafeTargetHumanoid=nearestHumanoid
             if strafeTarget and strafeTargetHumanoid and strafeTargetHumanoid.Health>0 then
-                local center=strafeTarget.Position
+                local targetChar=strafeTarget.Parent
+                local targetHead=targetChar and targetChar:FindFirstChild("Head")
+                local anchor=(KF.StrafeMode=="Above Head" and targetHead) or strafeTarget
+                local center=anchor.Position
                 local pos
                 if KF.StrafeMode=="Above Head" then
-                    pos=center+Vector3.new(0,KF.StrafeHeight,0)
+                    -- Use the target's actual head height above its root, then
+                    -- add the user offset. This avoids using a stale/odd head
+                    -- coordinate that can place the local character far away.
+                    local headOffset=targetHead and math.max(targetHead.Position.Y-strafeTarget.Position.Y,2) or 3
+                    local safeHeight=math.clamp(KF.StrafeHeight,5,35)
+                    pos=strafeTarget.Position+Vector3.new(0,headOffset+safeHeight,0)
                 else
                     -- Beta: hold one fixed point behind the target; no orbit movement.
-                    pos=center-strafeTarget.CFrame.LookVector*KF.StrafeRadius+Vector3.new(0,KF.StrafeHeight*0.25,0)
+                    pos=strafeTarget.Position-strafeTarget.CFrame.LookVector*KF.StrafeRadius+Vector3.new(0,KF.StrafeHeight*0.25,0)
                 end
-                if KF.StrafeFace then
-                    root.CFrame=CFrame.new(pos,Vector3.new(center.X,pos.Y,center.Z))
-                else
-                    root.CFrame=CFrame.new(pos)*(root.CFrame-root.CFrame.Position)
+                if pos.Y==pos.Y and math.abs(pos.Y)<100000 then
+                    if KF.StrafeFace then
+                        root.CFrame=CFrame.lookAt(pos,center)
+                    else
+                        root.CFrame=CFrame.new(pos)*(root.CFrame-root.CFrame.Position)
+                    end
+                    root.AssemblyLinearVelocity=Vector3.zero
+                    root.AssemblyAngularVelocity=Vector3.zero
                 end
-                root.AssemblyLinearVelocity=Vector3.zero
             end
         else
             strafeTarget=nil
