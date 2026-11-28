@@ -15628,6 +15628,7 @@ return function(runtime,library)
         else Camera.CFrame=Camera.CFrame:Lerp(CFrame.new(Camera.CFrame.Position,pos),factor) end
     end
 
+    -- #combat
     -- COMBAT TAB
     local gAimL=tabCombat:AddLeftGroupbox("Aimbot")
     local gAimR=tabCombat:AddRightGroupbox("Silent Aim")
@@ -15641,6 +15642,7 @@ return function(runtime,library)
     gAimL:AddDropdown("KH_AimPart",{Text="Aim Part",Values={"Head","UpperTorso","LowerTorso","HumanoidRootPart","LeftUpperArm","RightUpperArm","LeftUpperLeg","RightUpperLeg"},Default="Head",Callback=function(v) for i,name in ipairs(COMBAT_AIM_PARTS) do if name==v then KF.AimPart=i;break end end end})
     gAimL:AddSlider("KH_AimDist",{Text="Max Distance",Min=100,Max=2000,Default=1000,Rounding=0,Callback=function(v) KF.MaxDistance=v end})
     gAimL:AddDivider()
+    -- #triggerbot
     gAimL:AddToggle("KH_TriggerBot",{Text="Trigger Bot",Default=false,Callback=function(v) KF.TriggerBot=v end})
     gAimL:AddToggle("KH_TriggerRMB",{Text="Trigger: Need RMB",Default=false,Callback=function(v) KF.TriggerRMB=v end})
     gAimL:AddToggle("KH_TriggerWall",{Text="Trigger Wall Check",Default=true,Callback=function(v) KF.TriggerWallCheck=v end})
@@ -15650,10 +15652,12 @@ return function(runtime,library)
     gAimL:AddToggle("KH_LockHold",{Text="Lock: Need RMB",Default=true,Callback=function(v) KF.LockHold=v end})
     gAimL:AddSlider("KH_LockFOV",{Text="Lock FOV",Min=30,Max=800,Default=200,Rounding=0,Callback=function(v) KF.LockFOV=v end})
     gAimL:AddDivider()
+    -- #ragebot
     gAimL:AddToggle("KH_RageBot",{Text="Rage Bot",Default=false,Callback=function(v) KF.RageBot=v end})
     gAimL:AddToggle("KH_RageAutoFire",{Text="Rage Auto Fire",Default=true,Callback=function(v) KF.RageAutoFire=v end})
     gAimL:AddSlider("KH_RageRange",{Text="Rage Range",Min=50,Max=3000,Default=1000,Rounding=0,Callback=function(v) KF.RageRange=v end})
     gAimL:AddSlider("KH_RageCPS",{Text="Rage CPS",Min=1,Max=30,Default=15,Rounding=0,Callback=function(v) KF.RageCPS=v end})
+    -- #silent aim
     gAimR:AddToggle("KH_Silent",{Text="Silent Aim",Default=false,Callback=function(v) KF.SilentAim=v end})
     gAimR:AddSlider("KH_SilentFOV",{Text="FOV",Min=50,Max=500,Default=150,Rounding=0,Callback=function(v) KF.FOV=v end})
     gAimR:AddToggle("KH_SilentShowFOV",{Text="Show Silent Aim FOV",Default=false,Callback=function(v) KF.SilentShowCircle=v end})
@@ -16385,7 +16389,9 @@ return function(runtime,library)
         return WeaponMods
     end)()
 
-    local weaponGroup = tabCombat:AddRightGroupbox("Weapon Mods")
+    -- #weapon mod
+    local weaponGroup = tabCombat:AddRightGroupbox("Weapon Mod")
+    -- Aim & Fire, Cooldowns, Melee, and Grenades are intentionally grouped under Weapon Mod.
     local function onWeaponModsChange()
         local enabled=false
         for _,key in ipairs({"P4S1T1","P4S1T2","P4S1T4","P4S2T2","P4S2T3","P4S2T4","P4S1T5","P4S1T6"}) do
@@ -16396,6 +16402,9 @@ return function(runtime,library)
         if not WeaponMods.Apply() then library:Notify("Vào trận rồi bật lại Weapon Mods.", 4) end
     end
 
+    -- #aim & fire
+    weaponGroup:AddLabel("Aim & Fire")
+    weaponGroup:AddDivider()
     weaponGroup:AddToggle("P4S1T1", { Text = "Weapon Attack Speed", Default = false, Callback = onWeaponModsChange })
     local depSpeed = weaponGroup:AddDependencyBox()
     depSpeed:AddSlider("P4S1S4", { Text = "Speed Boost", Default = 85, Min = 0, Max = 85, Rounding = 0, Suffix = "%", Compact = true, Callback = onWeaponModsChange })
@@ -16422,11 +16431,17 @@ return function(runtime,library)
     depEquip:SetupDependencies({ { library.Toggles.P4S2T3, true } })
 
     weaponGroup:AddToggle("P4S2T4", { Text = "Automatic Weapon", Default = false, Callback = onWeaponModsChange })
+    -- #cooldowns
+    weaponGroup:AddLabel("Cooldowns")
+    weaponGroup:AddDivider()
     weaponGroup:AddToggle("P4S1T5", { Text = "Scythe Dash Cooldown", Default = false, Callback = onWeaponModsChange })
     local depDash = weaponGroup:AddDependencyBox()
     depDash:AddSlider("P4S1S5", { Text = "Cooldown Reduction", Default = 75, Min = 0, Max = 100, Rounding = 0, Suffix = "%", Compact = true, Callback = onWeaponModsChange })
     depDash:SetupDependencies({ { library.Toggles.P4S1T5, true } })
 
+    -- #grenades
+    weaponGroup:AddLabel("Grenades")
+    weaponGroup:AddDivider()
     weaponGroup:AddToggle("P4S1T6", { Text = "Grenade Fuse", Default = false, Callback = onWeaponModsChange })
     local depFuse = weaponGroup:AddDependencyBox()
     depFuse:AddDropdown("P4S1D1", { Values = { "Impact", "Throw" }, Default = "Impact", Text = "Explode On", Callback = onWeaponModsChange })
@@ -16435,144 +16450,6 @@ return function(runtime,library)
 
     library:OnUnload(function()
         WeaponMods.RestoreAll()
-    end)
-
-    -- Client-only cosmetic hit feedback. This does not change weapon damage or targeting.
-    local hitFxEnabled = false
-    local hitFxColor = Color3.fromRGB(159, 133, 195)
-    local hitSoundEnabled = false
-    local hitSoundStyle = "Rust HS"
-    local hitSoundVolume = 0.5
-    local hitSoundPitch = 1
-    local hitSoundAssets = {
-        ["Rust HS"] = "rbxassetid://5043539486",
-        ["Neverlose"] = "rbxassetid://97643101798871",
-        ["Minecraft Bow"] = "rbxassetid://3442683707",
-        ["Minecraft Hit"] = "rbxassetid://8766809464",
-        ["CSGO"] = "rbxassetid://5764885315",
-        ["Bubble"] = "rbxassetid://6534947588",
-        ["Lazer"] = "rbxassetid://130791043",
-        ["Pick"] = "rbxassetid://1347140027",
-        ["Pop"] = "rbxassetid://198598793",
-        ["Rust"] = "rbxassetid://1255040462",
-        ["Sans"] = "rbxassetid://3188795283",
-        ["Fart"] = "rbxassetid://130833677",
-        ["Big"] = "rbxassetid://5332005053",
-        ["Vine"] = "rbxassetid://5332680810",
-        ["UwU"] = "rbxassetid://8679659744",
-        ["Bruh"] = "rbxassetid://4578740568",
-        ["Skeet"] = "rbxassetid://5633695679",
-        ["Fatality"] = "rbxassetid://6534947869",
-        ["Bonk"] = "rbxassetid://5766898159",
-        ["Minecraft"] = "rbxassetid://5869422451",
-        ["Gamesense"] = "rbxassetid://4817809188",
-        ["RIFK7"] = "rbxassetid://9102080552",
-    }
-    local hitFxConnection
-    local hitFxDebounce = setmetatable({}, { __mode = "k" })
-    local hitFxGroup = tabCombat:AddLeftGroupbox("Hit Effects")
-
-    local function emitCosmeticHitEffect(billboard)
-        if not hitFxEnabled or not billboard or not billboard:IsA("BillboardGui") then return end
-        if hitFxDebounce[billboard] then return end
-        local label = billboard:FindFirstChildWhichIsA("TextLabel", true)
-        if not label or not (tonumber(label.Text) and tonumber(label.Text) > 0) then return end
-        local adornee = billboard.Adornee
-        if not adornee and billboard.Parent and billboard.Parent:IsA("BasePart") then
-            adornee = billboard.Parent
-        end
-        local part = adornee
-        if part and part:IsA("Model") then
-            part = part.PrimaryPart or part:FindFirstChild("HumanoidRootPart") or part:FindFirstChildWhichIsA("BasePart")
-        end
-        if not part or not part:IsA("BasePart") then return end
-        hitFxDebounce[billboard] = true
-        if hitSoundEnabled then
-            local soundId = hitSoundAssets[hitSoundStyle]
-            if soundId then
-                local sound = Instance.new("Sound")
-                sound.Name = "KhangHubHitSound"
-                sound.SoundId = soundId
-                sound.Volume = hitSoundVolume
-                sound.PlaybackSpeed = hitSoundPitch
-                sound.Parent = workspace.CurrentCamera or workspace
-                sound:Play()
-                game:GetService("Debris"):AddItem(sound, 5)
-            end
-        end
-        local attachment = Instance.new("Attachment")
-        attachment.Name = "KhangHubHitFx"
-        attachment.Parent = part
-        local emitter = Instance.new("ParticleEmitter")
-        emitter.Name = "KhangHubHitSpark"
-        emitter.Texture = "rbxasset://textures/particles/sparkles_main.dds"
-        emitter.Color = ColorSequence.new(hitFxColor)
-        emitter.LightEmission = 0.8
-        emitter.Lifetime = NumberRange.new(0.25, 0.65)
-        emitter.Speed = NumberRange.new(3, 7)
-        emitter.SpreadAngle = Vector2.new(180, 180)
-        emitter.Rate = 0
-        emitter.Rotation = NumberRange.new(0, 360)
-        emitter.RotSpeed = NumberRange.new(-120, 120)
-        emitter.Size = NumberSequence.new({
-            NumberSequenceKeypoint.new(0, 0.22),
-            NumberSequenceKeypoint.new(1, 0)
-        })
-        emitter.Transparency = NumberSequence.new({
-            NumberSequenceKeypoint.new(0, 0.05),
-            NumberSequenceKeypoint.new(1, 1)
-        })
-        emitter.Parent = attachment
-        emitter:Emit(14)
-        task.delay(1.2, function()
-            if attachment and attachment.Parent then attachment:Destroy() end
-        end)
-    end
-
-    hitFxGroup:AddToggle("KH_HitFxEnabled", {
-        Text = "Enable hit particles",
-        Default = false,
-        Callback = function(value)
-            hitFxEnabled = value == true
-            if hitFxConnection then hitFxConnection:Disconnect(); hitFxConnection = nil end
-            if hitFxEnabled then
-                hitFxConnection = workspace.DescendantAdded:Connect(function(object)
-                    if object:IsA("BillboardGui") then
-                        task.defer(emitCosmeticHitEffect, object)
-                    end
-                end)
-            end
-        end
-    }):AddColorPicker("KH_HitFxColor", {
-        Default = hitFxColor,
-        Title = "Hit effect color",
-        Callback = function(value) hitFxColor = value end
-    })
-    hitFxGroup:AddToggle("KH_HitSoundEnabled", {
-        Text = "Enable hit sound",
-        Default = false,
-        Callback = function(value) hitSoundEnabled = value == true end
-    })
-    hitFxGroup:AddDropdown("KH_HitSoundStyle", {
-        Text = "Hit sound style",
-        Values = {"Rust HS", "Neverlose", "Minecraft Bow", "Minecraft Hit", "CSGO", "Bubble", "Lazer", "Pick", "Pop", "Rust", "Sans", "Fart", "Big", "Vine", "UwU", "Bruh", "Skeet", "Fatality", "Bonk", "Minecraft", "Gamesense", "RIFK7"},
-        Default = "Rust HS",
-        Callback = function(value) hitSoundStyle = value end
-    })
-    hitFxGroup:AddSlider("KH_HitSoundVolume", {
-        Text = "Hit sound volume",
-        Min = 0, Max = 100, Default = 50, Rounding = 0, Suffix = "%",
-        Callback = function(value) hitSoundVolume = value / 100 end
-    })
-    hitFxGroup:AddSlider("KH_HitSoundPitch", {
-        Text = "Hit sound pitch",
-        Min = 50, Max = 200, Default = 100, Rounding = 0, Suffix = "%",
-        Callback = function(value) hitSoundPitch = value / 100 end
-    })
-
-    library:OnUnload(function()
-        hitFxEnabled = false
-        if hitFxConnection then hitFxConnection:Disconnect(); hitFxConnection = nil end
     end)
 
     -- Weapon Mods stay disabled until the user enables a toggle.
@@ -16603,8 +16480,10 @@ return function(runtime,library)
     gMoveL:AddSlider("KH_SpeedVal",{Text="Walk Speed",Min=16,Max=200,Default=50,Rounding=0,Callback=function(v) KF.SpeedValue=v end})
     gMoveL:AddToggle("KH_Jump",{Text="Jump Power",Default=false,Callback=function(v) KF.JumpHack=v end})
     gMoveL:AddSlider("KH_JumpVal",{Text="Jump Value",Min=50,Max=300,Default=100,Rounding=0,Callback=function(v) KF.JumpValue=v end})
-    gMoveL:AddToggle("KH_InfJump",{Text="Infinite Jump",Default=false,Callback=function(v) KF.InfJump=v end})
+    -- #infinite double jumps
+    gMoveL:AddToggle("KH_InfDoubleJump",{Text="Infinite Double Jumps",Default=false,Callback=function(v) KF.InfJump=v end})
     gMoveL:AddToggle("KH_Noclip",{Text="Noclip",Default=false,Callback=function(v) KF.Noclip=v end})
+    -- #flight
     gMoveL:AddToggle("KH_Fly",{Text="Fly",Default=false,Callback=function(v) KF.Fly=v end})
     gMoveL:AddSlider("KH_FlySpeed",{Text="Fly Speed",Min=10,Max=200,Default=60,Rounding=0,Callback=function(v) KF.FlySpeed=v end})
     gMoveL:AddToggle("KH_AntiAFK",{Text="Anti AFK",Default=false,Callback=function(v) KF.AntiAFK=v end})
@@ -17033,6 +16912,7 @@ local SKYBOX_PRESETS={
         end
         if KF.Speed and hum and root and not KF.Fly then local md=hum.MoveDirection;if md.Magnitude>0 then root.CFrame=root.CFrame+md.Unit*math.max(KF.SpeedValue-16,0)*dt end end
         if KF.JumpHack and hum and root then if hum:GetState()==Enum.HumanoidStateType.Jumping then if not jumpApplied then jumpApplied=true;local v=root.AssemblyLinearVelocity;root.AssemblyLinearVelocity=Vector3.new(v.X,KF.JumpValue,v.Z) end else jumpApplied=false end end
+        -- #flight
         if KF.Fly and hum and root then
             if not flyBV or flyBV.Parent~=root then stopFly();flyBV=Instance.new("BodyVelocity");flyBV.MaxForce=Vector3.new(1e9,1e9,1e9);flyBV.Velocity=Vector3.zero;flyBV.Parent=root;flyBG=Instance.new("BodyGyro");flyBG.MaxTorque=Vector3.new(1e9,1e9,1e9);flyBG.P=9e4;flyBG.Parent=root end
             hum.PlatformStand=true;local cam=Camera.CFrame;local dir=Vector3.zero
@@ -17120,7 +17000,8 @@ local SKYBOX_PRESETS={
         local newCF=CFrame.new(pos)*(cf-cf.Position);Camera.CFrame=newCF;tpLastCF=newCF
     end)
 
-    -- INF JUMP + ANTI AFK
+    -- #infinite double jumps
+    -- INFINITE DOUBLE JUMPS + ANTI AFK
     UserInputService.JumpRequest:Connect(function() if KF.InfJump then local hum=getHum();if hum then hum:ChangeState(Enum.HumanoidStateType.Jumping) end;local root=getRoot();if root then local v=root.AssemblyLinearVelocity;root.AssemblyLinearVelocity=Vector3.new(v.X,KF.JumpHack and KF.JumpValue or 50,v.Z) end end end)
     LocalPlayer.Idled:Connect(function() if KF.AntiAFK then local vu=game:GetService("VirtualUser");vu:CaptureController();vu:ClickButton2(Vector2.new()) end end)
 
