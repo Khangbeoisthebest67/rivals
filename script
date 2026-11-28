@@ -1740,12 +1740,12 @@ end
 -- ============================================================================
 
 do
-    local yabujinCoreState = { _withId=function(fn, ...) return KhangDeobfuscated.runWithElevatedThreadIdentity(fn, ...) end }
+    local khangCoreState = { _withId=function(fn, ...) return KhangDeobfuscated.runWithElevatedThreadIdentity(fn, ...) end }
     KhangDeobfuscated.initKhangObsidianLibrary = function()
         local upval_3_57 = context.AssetBaseUrl or ""
 
         local b = Instance.new
-        yabujinCoreState._instNew = b
+        khangCoreState._instNew = b
         local J = function(N)
             if N == nil then return nil end
             local f = cloneref or clonereference
@@ -2943,7 +2943,7 @@ f_60.Unload = function(L)
     end
     f_60.Unloaded = true
     b_103:Destroy()
-    R().YabujinLibrary = nil
+    R().khangLibrary = nil
 end
 local L_152, P_153, v_154, X_155, V = f_60:GetIcon("check"), f_60:GetIcon("chevron-up"), f_60:GetIcon("move-diagonal-2"), f_60:GetIcon("key"), f_60:GetIcon("move")
 f_60.SetIconModule = function(K, K_156)
@@ -3900,8 +3900,8 @@ Y_191.AddCheckbox = function(J, o, Z)
         j.BackgroundColor3 = f_60.Scheme.MainColor
         f_60.Registry[j].BackgroundColor3 = "MainColor"
     end
-    if yabujinCoreState and yabujinCoreState._withId then
-        yabujinCoreState._withId(k_212)
+    if khangCoreState and khangCoreState._withId then
+        khangCoreState._withId(k_212)
     else
         pcall(k_212)
     end
@@ -4040,8 +4040,8 @@ Y_191.AddToggle = function(J, o, Z)
         j.BackgroundColor3 = f_60.Scheme.MainColor
         f_60.Registry[j].BackgroundColor3 = "MainColor"
     end
-    if yabujinCoreState and yabujinCoreState._withId then
-        yabujinCoreState._withId(L_222)
+    if khangCoreState and khangCoreState._withId then
+        khangCoreState._withId(L_222)
     else
         pcall(L_222)
     end
@@ -4151,8 +4151,8 @@ Z.Value = x_233
 local function o()
     I.Text = tostring(x_233)
 end
-if yabujinCoreState and yabujinCoreState._withId then
-    yabujinCoreState._withId(o)
+if khangCoreState and khangCoreState._withId then
+    khangCoreState._withId(o)
 else
     pcall(o)
 end
@@ -6491,7 +6491,7 @@ f_60:GiveSignal(A.PlayerAdded:Connect(M))
 f_60:GiveSignal(A.PlayerRemoving:Connect(M))
 f_60:GiveSignal(h.ChildAdded:Connect(b_396))
 f_60:GiveSignal(h.ChildRemoved:Connect(b_396))
-R().YabujinLibrary = f_60
+R().khangLibrary = f_60
 return f_60
 end
 end
@@ -6785,14 +6785,14 @@ end
         local env=getgenv and getgenv()or globalEnv
         if env.__KhangHubSession==self then env.__KhangHubSession=nil end
         if env.KhangRuntime==self then env.KhangRuntime=nil end
-        if env.YabujinRecovered==self then env.YabujinRecovered=nil end
+        if env.khangRecovered==self then env.khangRecovered=nil end
     end
     return KhangDeobfuscated
 end
 local environment=getgenv and getgenv()or globalEnv
-local options=environment.__YabujinOptions or {}
+local options=environment.__khangOptions or {}
 -- Single-instance guard: unload the previous Khang Hub before creating a new one.
-local previous=environment.__KhangHubSession or environment.KhangRuntime or environment.YabujinRecovered
+local previous=environment.__KhangHubSession or environment.KhangRuntime or environment.khangRecovered
 if previous and type(previous.Unload)=="function" then
     pcall(previous.Unload,previous)
 end
@@ -6820,7 +6820,7 @@ end)
 local runtime=createRuntime(options.Dependencies)
 runtime.New=createRuntime
 runtime.SourceStatus="Recovered functions with dependency bindings; original client startup and some upvalues were not included."
-environment.YabujinRecovered=runtime
+environment.khangRecovered=runtime
 environment.KhangRuntime=runtime
 environment.__KhangHubSession=runtime
 function runtime:StartUI()
@@ -15014,7 +15014,7 @@ function runtime:StopPlex()
     self.PlexApi=nil
 end
 function runtime:EnsurePlex()
-    assert(self.Alive,"Yabujin is unloaded")
+    assert(self.Alive,"khang is unloaded")
     if self.PlexApi then return self.PlexApi end
     assert(not(shared.Modern and not shared.Modern.Uninjecting),"Unload Plex before enabling the standalone backend")
     local ctx={Active=true}
@@ -15116,7 +15116,7 @@ return function(runtime)
         if self.BlurState.blur then self.BlurState.blur:Destroy();self.BlurState.blur=nil end
         self.BlurState.lastCFrame=nil
         if not enabled then return end
-        local blur=Instance.new('BlurEffect');blur.Name='YabujinRecoveredMotionBlur';blur.Size=0;blur.Parent=game:GetService('Lighting')
+        local blur=Instance.new('BlurEffect');blur.Name='khangRecoveredMotionBlur';blur.Size=0;blur.Parent=game:GetService('Lighting')
         self.BlurState.blur=blur
         local helper=runtime.New({motionBlurState=self.BlurState})
         self.BlurConnection=game:GetService('RunService').Heartbeat:Connect(function(dt)helper.updateCameraMotionBlur(dt)end)
@@ -16000,7 +16000,7 @@ return function(runtime,library)
 
         -- ---------- Grenade Fuse ------------------------------------------------------
 
-        -- Port của KiciaInputHook + KiciaGrenadeFusePrototype.
+       
 
         local InputHook = { Installed = false, Restore = nil, Bindings = {} }
 
@@ -17026,7 +17026,7 @@ local SKYBOX_PRESETS={
         local env=getgenv and getgenv()or _G
         if env.__KhangHubSession==runtime then env.__KhangHubSession=nil end
         if env.KhangRuntime==runtime then env.KhangRuntime=nil end
-        if env.YabujinRecovered==runtime then env.YabujinRecovered=nil end
+        if env.khangRecovered==runtime then env.khangRecovered=nil end
     end)end
 
     -- Re-select the first tab after every groupbox/control has been registered.
